@@ -1,8 +1,9 @@
-local SPAWN_DELAY = 0.5
-local DEFAULT_SPEED = 25
+local SPAWN_DELAY = 0.25
+local DEFAULT_SPEED = 35
 local WIN_SPEED = 50
 local PADDING = 24
 local TEXT_GAP = 6
+local SURVIVOR_PATH = "players/survivors.txt"
 
 local BEATS = {
   Rock = "Scissors",
@@ -10,15 +11,20 @@ local BEATS = {
   Scissors = "Paper",
 }
 
+local orderedKinds = { "Paper", "Rock", "Scissors" }
+
 local infoFont
 local victoryFont
 local windowWidth, windowHeight
-local spawnQueue
-local spawnedEntities
-local nextSpawnIndex
+local spawnQueue = {}
+local spawnedEntities = {}
+local nextSpawnIndex = 1
 local timeUntilNextSpawn
 local aliveCounts = { Paper = 0, Rock = 0, Scissors = 0 }
-local orderedKinds = { "Paper", "Rock", "Scissors" }
+local playerNames = {}
+local textures = {}
+local scales = {}
+local resultsRecorded = false
 
 local function getActiveTypes()
   local active = {}
@@ -112,9 +118,11 @@ local function handleEntityCollisions()
           else
             if BEATS[a.kind] == b.kind then
               b.dead = true
+              a.kills = a.kills + 1
               aliveCounts[b.kind] = math.max(0, aliveCounts[b.kind] - 1)
             elseif BEATS[b.kind] == a.kind then
               a.dead = true
+              b.kills = b.kills + 1
               aliveCounts[a.kind] = math.max(0, aliveCounts[a.kind] - 1)
               break
             else
@@ -161,7 +169,7 @@ local function adjustEntitySpeeds()
         setEntitySpeed(entity, DEFAULT_SPEED)
       end
     end
-  elseif #activeTypes == 1 then
+  elseif #activeTypes <= 1 then
     for _, entity in ipairs(spawnedEntities) do
       setEntitySpeed(entity, 0)
     end
@@ -169,6 +177,33 @@ local function adjustEntitySpeeds()
     for _, entity in ipairs(spawnedEntities) do
       setEntitySpeed(entity, DEFAULT_SPEED)
     end
+  end
+end
+
+local function loadPlayerNames()
+  playerNames = {}
+
+  if love.filesystem.getInfo("players/players.txt") then
+    local contents = love.filesystem.read("players/players.txt")
+    if contents then
+      for line in contents:gmatch("[^\r\n]+") do
+        local cleaned = line:match("^%s*(.-)%s*$")
+        if cleaned ~= "" then
+          playerNames[#playerNames + 1] = cleaned
+        end
+      end
+    end
+  end
+
+  if #playerNames == 0 then
+    playerNames = { "PaperPilot", "RockRanger", "ScissorScout" }
+  end
+end
+
+local function shufflePlayers()
+  for i = #playerNames, 2, -1 do
+    local j = love.math.random(i)
+    playerNames[i], playerNames[j] = playerNames[j], playerNames[i]
   end
 end
 
@@ -189,7 +224,7 @@ local function spawnEntity(entry)
   local angle = love.math.random() * 2 * math.pi
 
   local entity = {
-    name = entry.name,
+    playerName = entry.playerName,
     kind = entry.kind,
     image = image,
     x = x,
@@ -199,10 +234,45 @@ local function spawnEntity(entry)
     height = scaledHeight,
     vx = math.cos(angle) * DEFAULT_SPEED,
     vy = math.sin(angle) * DEFAULT_SPEED,
+    kills = 0,
   }
 
   spawnedEntities[#spawnedEntities + 1] = entity
   aliveCounts[entry.kind] = aliveCounts[entry.kind] + 1
+end
+
+local function recordSurvivors()
+  if resultsRecorded then
+    return
+  end
+
+  local file, err = io.open(SURVIVOR_PATH, "w")
+  if not file then
+    print(("Unable to write survivors.txt: %s"):format(err or "unknown error"))
+    resultsRecorded = true
+    return
+  end
+
+  if #spawnedEntities > 0 then
+    local survivors = {}
+    for _, entity in ipairs(spawnedEntities) do
+      survivors[#survivors + 1] = entity
+    end
+
+    table.sort(survivors, function(a, b)
+      if a.kills == b.kills then
+        return a.playerName < b.playerName
+      end
+      return a.kills > b.kills
+    end)
+
+    for _, entity in ipairs(survivors) do
+      file:write(string.format("%s %d\n", entity.playerName, entity.kills))
+    end
+  end
+
+  file:close()
+  resultsRecorded = true
 end
 
 function love.load()
@@ -217,13 +287,13 @@ function love.load()
   local maxSpriteWidth = windowWidth * 0.05
   local maxSpriteHeight = windowHeight * 0.05
 
-  local textures = {
+  textures = {
     Paper = love.graphics.newImage("assets/paper.png"),
     Rock = love.graphics.newImage("assets/rock.png"),
     Scissors = love.graphics.newImage("assets/scissors.png"),
   }
 
-  local scales = {}
+  scales = {}
   for kind, image in pairs(textures) do
     scales[kind] = math.min(
       maxSpriteWidth / image:getWidth(),
@@ -231,26 +301,30 @@ function love.load()
     )
   end
 
-  spawnQueue = {}
-  local function enqueue(kind, count)
-    for _ = 1, count do
-      spawnQueue[#spawnQueue + 1] = {
-        name = kind,
-        kind = kind,
-        image = textures[kind],
-        scale = scales[kind],
-      }
-    end
-  end
+  loadPlayerNames()
+  shufflePlayers()
 
-  enqueue("Paper", 3)
-  enqueue("Rock", 3)
-  enqueue("Scissors", 3)
+  spawnQueue = {}
+  for index, playerName in ipairs(playerNames) do
+    local kind = orderedKinds[((index - 1) % #orderedKinds) + 1]
+    spawnQueue[#spawnQueue + 1] = {
+      playerName = playerName,
+      kind = kind,
+      image = textures[kind],
+      scale = scales[kind],
+    }
+  end
 
   spawnedEntities = {}
   aliveCounts = { Paper = 0, Rock = 0, Scissors = 0 }
   nextSpawnIndex = 1
-  timeUntilNextSpawn = SPAWN_DELAY
+  timeUntilNextSpawn = (#spawnQueue > 0) and SPAWN_DELAY or nil
+  resultsRecorded = false
+
+  local survivorFile = io.open(SURVIVOR_PATH, "w")
+  if survivorFile then
+    survivorFile:close()
+  end
 end
 
 function love.update(dt)
@@ -296,6 +370,11 @@ function love.update(dt)
     handleEntityCollisions()
     removeDeadEntities()
     adjustEntitySpeeds()
+
+    local activeTypes = getActiveTypes()
+    if (not resultsRecorded) and #activeTypes <= 1 then
+      recordSurvivors()
+    end
   end
 end
 
@@ -303,25 +382,26 @@ function love.draw()
   love.graphics.setFont(infoFont)
   love.graphics.setColor(1, 1, 1)
 
-  local _, _, _, _, _, lineSpacing = getPlayfieldBounds()
+  local minX, minY, maxX, maxY, _, lineSpacing = getPlayfieldBounds()
   local activeTypes = getActiveTypes()
 
   local timerText
   if timeUntilNextSpawn then
     timerText = string.format("Time until next spawn: %.1f s", math.max(0, timeUntilNextSpawn))
   else
-    timerText = "All entities have spawned."
+    timerText = "All players have spawned."
   end
 
-  local nextName
+  local nextUp
   if nextSpawnIndex <= #spawnQueue then
-    nextName = spawnQueue[nextSpawnIndex].name
+    local entry = spawnQueue[nextSpawnIndex]
+    nextUp = string.format("%s (%s)", entry.playerName, entry.kind)
   else
-    nextName = "None"
+    nextUp = "None"
   end
 
   love.graphics.print(timerText, PADDING, PADDING)
-  love.graphics.print("Next up: " .. nextName, PADDING, PADDING + lineSpacing)
+  love.graphics.print("Next up: " .. nextUp, PADDING, PADDING + lineSpacing)
 
   local countersText = string.format(
     "Paper: %d | Rock: %d | Scissors: %d",
@@ -331,18 +411,18 @@ function love.draw()
   )
   love.graphics.print(countersText, PADDING, PADDING + 2 * lineSpacing)
 
-  local minX, minY, maxX, maxY = getPlayfieldBounds()
   love.graphics.rectangle("line", minX, minY, maxX - minX, maxY - minY)
 
   for _, entity in ipairs(spawnedEntities) do
     local image = entity.image
-    local label = entity.name
+    local killsSuffix = entity.kills > 0 and (" " .. entity.kills) or ""
+    local label = entity.playerName .. killsSuffix
     local labelX = entity.x + (entity.width - infoFont:getWidth(label)) / 2
     love.graphics.print(label, labelX, entity.y - infoFont:getHeight() - 4)
     love.graphics.draw(image, entity.x, entity.y, 0, entity.scale, entity.scale)
   end
 
-  local hasWinner = not timeUntilNextSpawn and #activeTypes == 1
+  local hasWinner = not timeUntilNextSpawn and #activeTypes == 1 and #spawnedEntities > 0
   if hasWinner then
     local winner = activeTypes[1]
     local centerX = minX + (maxX - minX) / 2
