@@ -1,6 +1,6 @@
-local SPAWN_DELAY = 0.25
-local DEFAULT_SPEED = 35
-local WIN_SPEED = 50
+local SPAWN_DELAY = 0.1
+local DEFAULT_SPEED = 45
+local WIN_SPEED = 100
 local PADDING = 24
 local TEXT_GAP = 6
 local SURVIVOR_PATH = "players/survivors.txt"
@@ -37,13 +37,13 @@ local function getActiveTypes()
 end
 
 local function getPlayfieldBounds()
-  local infoHeight = infoFont:getHeight()
-  local lineSpacing = infoHeight + TEXT_GAP
+  local countersHeight = infoFont:getHeight()
+  local lineSpacing = countersHeight + TEXT_GAP
   local minX = PADDING
-  local minY = PADDING + 2 * lineSpacing + infoHeight + 4
+  local minY = PADDING + countersHeight + TEXT_GAP + 16
   local maxX = windowWidth - PADDING
   local maxY = windowHeight - PADDING
-  return minX, minY, maxX, maxY, infoHeight, lineSpacing
+  return minX, minY, maxX, maxY, countersHeight, lineSpacing
 end
 
 local function setEntitySpeed(entity, speed)
@@ -104,6 +104,17 @@ local function separateEntities(a, b)
   end
 end
 
+local function growEntity(entity)
+  entity.scale = entity.scale * 1.1
+  entity.width = entity.image:getWidth() * entity.scale
+  entity.height = entity.image:getHeight() * entity.scale
+
+  local minX, minY, maxX, maxY = getPlayfieldBounds()
+
+  entity.x = math.max(minX, math.min(entity.x, maxX - entity.width))
+  entity.y = math.max(minY, math.min(entity.y, maxY - entity.height))
+end
+
 local function handleEntityCollisions()
   for i = 1, #spawnedEntities do
     local a = spawnedEntities[i]
@@ -119,10 +130,12 @@ local function handleEntityCollisions()
             if BEATS[a.kind] == b.kind then
               b.dead = true
               a.kills = a.kills + 1
+              growEntity(a)
               aliveCounts[b.kind] = math.max(0, aliveCounts[b.kind] - 1)
             elseif BEATS[b.kind] == a.kind then
               a.dead = true
               b.kills = b.kills + 1
+              growEntity(b)
               aliveCounts[a.kind] = math.max(0, aliveCounts[a.kind] - 1)
               break
             else
@@ -385,31 +398,13 @@ function love.draw()
   local minX, minY, maxX, maxY, _, lineSpacing = getPlayfieldBounds()
   local activeTypes = getActiveTypes()
 
-  local timerText
-  if timeUntilNextSpawn then
-    timerText = string.format("Time until next spawn: %.1f s", math.max(0, timeUntilNextSpawn))
-  else
-    timerText = "All players have spawned."
-  end
-
-  local nextUp
-  if nextSpawnIndex <= #spawnQueue then
-    local entry = spawnQueue[nextSpawnIndex]
-    nextUp = string.format("%s (%s)", entry.playerName, entry.kind)
-  else
-    nextUp = "None"
-  end
-
-  love.graphics.print(timerText, PADDING, PADDING)
-  love.graphics.print("Next up: " .. nextUp, PADDING, PADDING + lineSpacing)
-
   local countersText = string.format(
     "Paper: %d | Rock: %d | Scissors: %d",
     aliveCounts.Paper,
     aliveCounts.Rock,
     aliveCounts.Scissors
   )
-  love.graphics.print(countersText, PADDING, PADDING + 2 * lineSpacing)
+  love.graphics.print(countersText, PADDING, PADDING)
 
   love.graphics.rectangle("line", minX, minY, maxX - minX, maxY - minY)
 
