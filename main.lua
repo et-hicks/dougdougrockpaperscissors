@@ -48,12 +48,8 @@ local function getPlayfieldBounds()
   return minX, minY, maxX, maxY, countersHeight, lineSpacing
 end
 
-local function addAliveRecord(entity, centerX, centerY)
-  aliveLookup[entity.playerName] = {
-    entity = entity,
-    x = centerX,
-    y = centerY,
-  }
+local function addAliveRecord(entity)
+  aliveLookup[entity.playerName] = entity
 end
 
 local function removeAliveRecord(entity)
@@ -130,14 +126,14 @@ local function emitDeathEvent(entity)
   end
 end
 
-local function chooseRandomEnemyRecord(entity)
+local function chooseRandomEnemyTarget(entity)
   local preferred, fallback = {}, {}
-  for _, record in pairs(aliveLookup) do
-    if record.entity and not record.entity.dead and record.entity.playerName ~= entity.playerName then
-      if record.entity.kind ~= entity.kind then
-        preferred[#preferred + 1] = record
+  for _, candidate in pairs(aliveLookup) do
+    if candidate ~= entity and not candidate.dead then
+      if candidate.kind ~= entity.kind then
+        preferred[#preferred + 1] = candidate
       else
-        fallback[#fallback + 1] = record
+        fallback[#fallback + 1] = candidate
       end
     end
   end
@@ -156,37 +152,29 @@ local function ensureTargetForEntity(entity)
 
   if entity.speed and entity.speed <= 0 then
     entity.vx, entity.vy = 0, 0
-    entity.targetLocation = nil
-    entity.targetName = nil
+    entity.targetEntity = nil
     return
   end
 
-  if entity.targetName then
-    local record = aliveLookup[entity.targetName]
-    if not record then
-      entity.targetLocation = nil
-      entity.targetName = nil
-    else
-      entity.targetLocation = entity.targetLocation or { x = record.x, y = record.y }
+  if entity.targetEntity then
+    local target = entity.targetEntity
+    if target.dead or target.kind == entity.kind or not aliveLookup[target.playerName] then
+      entity.targetEntity = nil
     end
   end
 
-  if not entity.targetLocation then
-    local record = chooseRandomEnemyRecord(entity)
-    if record then
-      entity.targetLocation = { x = record.x, y = record.y }
-      entity.targetName = record.entity.playerName
-    else
-      entity.targetLocation = nil
-      entity.targetName = nil
-    end
+  if not entity.targetEntity then
+    entity.targetEntity = chooseRandomEnemyTarget(entity)
   end
 
-  if entity.targetLocation then
+  if entity.targetEntity then
+    local target = entity.targetEntity
     local centerX = entity.x + entity.width / 2
     local centerY = entity.y + entity.height / 2
-    local dx = entity.targetLocation.x - centerX
-    local dy = entity.targetLocation.y - centerY
+    local targetCenterX = target.x + target.width / 2
+    local targetCenterY = target.y + target.height / 2
+    local dx = targetCenterX - centerX
+    local dy = targetCenterY - centerY
     local dist = math.sqrt(dx * dx + dy * dy)
     if entity.speed and entity.speed > 0 and dist > 0 then
       entity.vx = dx / dist * entity.speed
@@ -194,6 +182,8 @@ local function ensureTargetForEntity(entity)
     else
       entity.vx, entity.vy = 0, 0
     end
+  else
+    entity.vx, entity.vy = 0, 0
   end
 end
 
@@ -202,8 +192,7 @@ local function refreshTargetsForAll()
     return
   end
   for _, entity in ipairs(spawnedEntities) do
-    entity.targetLocation = nil
-    entity.targetName = nil
+    entity.targetEntity = nil
     ensureTargetForEntity(entity)
   end
 end
@@ -280,8 +269,7 @@ local function adjustEntitySpeeds()
           setEntitySpeed(entity, WIN_SPEED)
         elseif entity.kind == losing then
           setEntitySpeed(entity, 0)
-          entity.targetLocation = nil
-          entity.targetName = nil
+          entity.targetEntity = nil
         else
           setEntitySpeed(entity, DEFAULT_SPEED)
         end
@@ -295,8 +283,7 @@ local function adjustEntitySpeeds()
   if #activeTypes <= 1 then
     for _, entity in ipairs(spawnedEntities) do
       setEntitySpeed(entity, 0)
-      entity.targetLocation = nil
-      entity.targetName = nil
+      entity.targetEntity = nil
     end
   else
     for _, entity in ipairs(spawnedEntities) do
@@ -362,8 +349,7 @@ local function spawnEntity(entry)
     vx = math.cos(angle) * DEFAULT_SPEED,
     vy = math.sin(angle) * DEFAULT_SPEED,
     kills = 0,
-    targetLocation = nil,
-    targetName = nil,
+    targetEntity = nil,
     speed = DEFAULT_SPEED,
   }
 
@@ -519,16 +505,18 @@ function love.update(dt)
         entity.vy = -math.abs(entity.vy)
       end
 
-      if spawnCompleteAnnounced and entity.targetLocation then
+      if spawnCompleteAnnounced and entity.targetEntity then
         local centerX = entity.x + entity.width / 2
         local centerY = entity.y + entity.height / 2
-        local dx = entity.targetLocation.x - centerX
-        local dy = entity.targetLocation.y - centerY
+        local target = entity.targetEntity
+        local targetCenterX = target.x + target.width / 2
+        local targetCenterY = target.y + target.height / 2
+        local dx = targetCenterX - centerX
+        local dy = targetCenterY - centerY
         local dist = math.sqrt(dx * dx + dy * dy)
-        local reachThreshold = math.max(entity.width, entity.height) / 2 + 4
+        local reachThreshold = (math.max(entity.width, entity.height) + math.max(target.width, target.height)) / 2 + 4
         if dist <= reachThreshold then
-          entity.targetLocation = nil
-          entity.targetName = nil
+          entity.targetEntity = nil
           ensureTargetForEntity(entity)
         end
       end
