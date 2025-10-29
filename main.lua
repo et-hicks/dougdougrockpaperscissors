@@ -169,25 +169,68 @@ local function adjustEntitySpeeds()
       winning, losing = second, first
     end
 
-    for _, entity in ipairs(spawnedEntities) do
-      if winning and losing then
+    if winning and losing then
+      local losingEntities = {}
+      for _, entity in ipairs(spawnedEntities) do
+        if not entity.dead and entity.kind == losing then
+          losingEntities[#losingEntities + 1] = entity
+        end
+      end
+
+      for _, entity in ipairs(spawnedEntities) do
         if entity.kind == winning then
-          setEntitySpeed(entity, WIN_SPEED)
+          entity.chasing = true
+          if #losingEntities > 0 then
+            if not entity.target or entity.target.dead or entity.target.kind ~= losing then
+              entity.target = losingEntities[love.math.random(#losingEntities)]
+            end
+            local target = entity.target
+            if target then
+              local targetCenterX = target.x + target.width / 2
+              local targetCenterY = target.y + target.height / 2
+              local entityCenterX = entity.x + entity.width / 2
+              local entityCenterY = entity.y + entity.height / 2
+
+              local dx = targetCenterX - entityCenterX
+              local dy = targetCenterY - entityCenterY
+              local dist = math.sqrt(dx * dx + dy * dy)
+              if dist > 0 then
+                entity.vx = dx / dist * WIN_SPEED
+                entity.vy = dy / dist * WIN_SPEED
+              else
+                entity.vx, entity.vy = 0, 0
+              end
+            else
+              setEntitySpeed(entity, WIN_SPEED)
+            end
+          else
+            entity.target = nil
+            setEntitySpeed(entity, WIN_SPEED)
+          end
         elseif entity.kind == losing then
-          setEntitySpeed(entity, 0)
+          entity.chasing = false
+          entity.target = nil
+          entity.vx, entity.vy = 0, 0
         else
+          entity.chasing = false
+          entity.target = nil
           setEntitySpeed(entity, DEFAULT_SPEED)
         end
-      else
-        setEntitySpeed(entity, DEFAULT_SPEED)
       end
+      return
     end
-  elseif #activeTypes <= 1 then
+  end
+
+  if #activeTypes <= 1 then
     for _, entity in ipairs(spawnedEntities) do
+      entity.chasing = false
+      entity.target = nil
       setEntitySpeed(entity, 0)
     end
   else
     for _, entity in ipairs(spawnedEntities) do
+      entity.chasing = false
+      entity.target = nil
       setEntitySpeed(entity, DEFAULT_SPEED)
     end
   end
@@ -248,6 +291,8 @@ local function spawnEntity(entry)
     vx = math.cos(angle) * DEFAULT_SPEED,
     vy = math.sin(angle) * DEFAULT_SPEED,
     kills = 0,
+    target = nil,
+    chasing = false,
   }
 
   spawnedEntities[#spawnedEntities + 1] = entity
@@ -357,6 +402,8 @@ function love.update(dt)
       end
     end
   else
+    adjustEntitySpeeds()
+
     local minX, minY, maxX, maxY = getPlayfieldBounds()
 
     for _, entity in ipairs(spawnedEntities) do
@@ -377,6 +424,25 @@ function love.update(dt)
       elseif entity.y + entity.height >= maxY then
         entity.y = maxY - entity.height
         entity.vy = -math.abs(entity.vy)
+      end
+
+      if entity.chasing then
+        if not entity.target or entity.target.dead or entity.target.kind == entity.kind then
+          entity.target = nil
+        else
+          local target = entity.target
+          local targetCenterX = target.x + target.width / 2
+          local targetCenterY = target.y + target.height / 2
+          local entityCenterX = entity.x + entity.width / 2
+          local entityCenterY = entity.y + entity.height / 2
+          local dx = targetCenterX - entityCenterX
+          local dy = targetCenterY - entityCenterY
+          local dist = math.sqrt(dx * dx + dy * dy)
+          local reachThreshold = math.max(entity.width, entity.height, target.width, target.height) / 2
+          if dist <= reachThreshold then
+            entity.target = nil
+          end
+        end
       end
     end
 
@@ -417,7 +483,14 @@ function love.draw()
     love.graphics.draw(image, entity.x, entity.y, 0, entity.scale, entity.scale)
   end
 
+  local twoLeft = not timeUntilNextSpawn and #activeTypes == 2
   local hasWinner = not timeUntilNextSpawn and #activeTypes == 1 and #spawnedEntities > 0
+  if twoLeft then
+    love.graphics.setFont(infoFont)
+    local alert = "Only two left!!"
+    love.graphics.print(alert, PADDING, PADDING + lineSpacing)
+  end
+
   if hasWinner then
     local winner = activeTypes[1]
     local centerX = minX + (maxX - minX) / 2
