@@ -12,6 +12,7 @@ local lineY
 local cameraX = 0
 local shapes = {}
 local nextSpawnX = 0
+local barrierWidth = 16
 local jumpTimer = 0
 local jumpHoldAccum = 0
 local jumpWasHeld = false
@@ -120,15 +121,19 @@ function module.update(dt)
     rect.y = math.min(rect.y, lineY - rect.height)
   end
 
-  rect.x = math.max(PADDING, rect.x)
+  cameraX = rect.x + rect.width / 2 - windowWidth / 2
+  local barrierX = cameraX
+  local minX = barrierX + barrierWidth
+  if rect.x < minX then
+    rect.x = minX
+  end
+  cameraX = rect.x + rect.width / 2 - windowWidth / 2
 
   if jumpWasHeld and not jumpHeld then
     jumpHoldAccum = 0
   end
 
   jumpWasHeld = jumpHeld
-
-  cameraX = rect.x + rect.width / 2 - windowWidth / 2
 
   while nextSpawnX <= rect.x + windowWidth * 1.5 do
     local size = 30
@@ -155,6 +160,10 @@ function module.draw()
 
   love.graphics.push()
   love.graphics.translate(-math.floor(cameraX), 0)
+
+  local barrierX = math.floor(cameraX)
+  love.graphics.setColor(0.15, 0.15, 0.2)
+  love.graphics.rectangle("fill", barrierX, 0, barrierWidth, windowHeight)
 
   love.graphics.setColor(1, 1, 1)
   love.graphics.rectangle("fill", cameraX - windowWidth, lineY, windowWidth * 3, 4)
