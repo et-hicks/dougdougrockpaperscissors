@@ -139,6 +139,8 @@ function love.mousepressed(x, y, button)
         print("Options menu not implemented yet.")
       end
     end)
+  elseif state == "playing_rps" then
+    rockpaperscissors.mousepressed(x, y, button)
   elseif state == "paused_rps" then
     handleMenuClick(pauseButtons, x, y, function(action)
       if action == "resume" then

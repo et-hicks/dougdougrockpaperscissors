@@ -31,6 +31,9 @@ local aliveLookup = {}
 local spawnCompleteAnnounced = false
 local playerStats = {}
 local leaderboardScroll = 0
+local leaderboardActiveTab = 1
+local leaderboardTabBounds = {}
+local leaderboardMaxScroll = 0
 
 local function resetGameState()
   spawnQueue = {}
@@ -42,6 +45,9 @@ local function resetGameState()
   resultsRecorded = false
   spawnCompleteAnnounced = false
   leaderboardScroll = 0
+  leaderboardActiveTab = 1
+  leaderboardTabBounds = {}
+  leaderboardMaxScroll = 0
 end
 
 local function getActiveTypes()
@@ -457,6 +463,9 @@ function module.start()
   resetGameState()
   playerStats = {}
   leaderboardScroll = 0
+  leaderboardActiveTab = 1
+  leaderboardTabBounds = {}
+  leaderboardMaxScroll = 0
 
   windowWidth, windowHeight = love.graphics.getDimensions()
   local maxSpriteWidth = windowWidth * 0.05
@@ -497,6 +506,9 @@ function module.stop()
   resetGameState()
   leaderboardScroll = 0
   playerStats = {}
+  leaderboardActiveTab = 1
+  leaderboardTabBounds = {}
+  leaderboardMaxScroll = 0
 end
 
 function module.update(dt)
@@ -598,30 +610,37 @@ function module.draw()
   local hasWinner = not timeUntilNextSpawn and #spawnedEntities > 0 and #activeTypes == 1
   if hasWinner then
     local winner = activeTypes[1]
-    countersText = string.format("%s | Winner: %s | Press R to reset", countersText, winner)
+    countersText = string.format("%s | %s wins! Press R to reset", countersText, winner)
   end
 
   love.graphics.print(countersText, PADDING, PADDING)
 
   love.graphics.rectangle("line", minX, minY, maxX - minX, maxY - minY)
 
-  for _, entity in ipairs(spawnedEntities) do
-    local image = entity.image
-    local killsSuffix = entity.kills > 0 and (" " .. entity.kills) or ""
-    local label = entity.playerName .. killsSuffix
-    local labelX = entity.x + (entity.width - infoFont:getWidth(label)) / 2
-    love.graphics.print(label, labelX, entity.y - infoFont:getHeight() - 4)
-    love.graphics.draw(image, entity.x, entity.y, 0, entity.scale, entity.scale)
+  local twoLeft = not timeUntilNextSpawn and #activeTypes == 2
+  if not hasWinner then
+    leaderboardTabBounds = {}
+    leaderboardMaxScroll = 0
+    leaderboardScroll = 0
+    for _, entity in ipairs(spawnedEntities) do
+      local image = entity.image
+      local killsSuffix = entity.kills > 0 and (" " .. entity.kills) or ""
+      local label = entity.playerName .. killsSuffix
+      local labelX = entity.x + (entity.width - infoFont:getWidth(label)) / 2
+      love.graphics.print(label, labelX, entity.y - infoFont:getHeight() - 4)
+      love.graphics.draw(image, entity.x, entity.y, 0, entity.scale, entity.scale)
+    end
   end
 
-  local twoLeft = not timeUntilNextSpawn and #activeTypes == 2
-  if twoLeft then
+  if twoLeft and not hasWinner then
     love.graphics.setFont(infoFont)
     local alert = "Only two left!!"
     love.graphics.print(alert, PADDING, PADDING + lineSpacing)
   end
 
   if hasWinner then
+    local winner = activeTypes[1]
+
     local statsList = {}
     for _, data in pairs(playerStats) do
       if data.kills > 0 then
@@ -635,45 +654,142 @@ function module.draw()
       return a.kills > b.kills
     end)
 
-    if #statsList > 0 then
-      local fontHeight = infoFont:getHeight()
-      local rowHeight = fontHeight + 4
-      local headerHeight = fontHeight + 8
-      local totalHeight = headerHeight + #statsList * rowHeight
+    local winnersList = {}
+    for _, data in pairs(playerStats) do
+      if data.kind == winner then
+        winnersList[#winnersList + 1] = data
+      end
+    end
+    table.sort(winnersList, function(a, b)
+      if a.kills == b.kills then
+        return a.name < b.name
+      end
+      return a.kills > b.kills
+    end)
 
-      local viewportHeight = math.min(windowHeight * 0.6, totalHeight)
-      local viewportWidth = math.min(420, windowWidth - 2 * PADDING)
-      local viewportX = (windowWidth - viewportWidth) / 2
-      local viewportY = (windowHeight - viewportHeight) / 2
+    local tabs = {
+      { label = "Top Killers", data = statsList },
+      { label = "Winners Leaderboard", data = winnersList },
+    }
 
-      leaderboardScroll = math.max(0, math.min(leaderboardScroll, math.max(0, totalHeight - viewportHeight)))
+    leaderboardActiveTab = math.max(1, math.min(leaderboardActiveTab, #tabs))
 
-      love.graphics.rectangle("line", viewportX, viewportY, viewportWidth, viewportHeight)
-      love.graphics.printf("Leaderboard", viewportX, viewportY + 4, viewportWidth, "center")
+    local fontHeight = infoFont:getHeight()
+    local tabHeight = fontHeight + 12
+    local headerHeight = fontHeight + 8
+    local rowHeight = fontHeight + 6
+    local padding = 12
+    local viewportWidth = math.min(500, windowWidth - 2 * PADDING)
 
-      love.graphics.setScissor(viewportX, viewportY + headerHeight, viewportWidth, viewportHeight - headerHeight)
-      local y = viewportY + headerHeight - leaderboardScroll
-      for index, data in ipairs(statsList) do
-        local line = string.format("%d. %s (%s) - %d", index, data.name, data.kind, data.kills)
-        love.graphics.printf(line, viewportX + 8, y, viewportWidth - 16, "left")
+    local activeTab = tabs[leaderboardActiveTab]
+    local data = activeTab.data
+    local contentRows = math.max(1, #data)
+    local bottomPadding = rowHeight
+    local contentHeight = headerHeight + contentRows * rowHeight + bottomPadding
+    local viewportHeight = math.min(windowHeight * 0.7, contentHeight + tabHeight + padding * 2)
+    local viewportX = (windowWidth - viewportWidth) / 2
+    local viewportY = (windowHeight - viewportHeight) / 2
+
+    leaderboardMaxScroll = math.max(0, contentHeight - (viewportHeight - tabHeight - padding))
+    leaderboardScroll = math.max(0, math.min(leaderboardScroll, leaderboardMaxScroll))
+
+    love.graphics.setColor(0, 0, 0, 0.82)
+    love.graphics.rectangle("fill", viewportX, viewportY, viewportWidth, viewportHeight)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("line", viewportX, viewportY, viewportWidth, viewportHeight)
+
+    leaderboardTabBounds = {}
+    local tabWidth = viewportWidth / #tabs
+    for index, tab in ipairs(tabs) do
+      local tabX = viewportX + (index - 1) * tabWidth
+      local tabY = viewportY
+      if index == leaderboardActiveTab then
+        love.graphics.setColor(0.2, 0.5, 0.2, 0.9)
+      else
+        love.graphics.setColor(0.2, 0.2, 0.2, 0.7)
+      end
+      love.graphics.rectangle("fill", tabX, tabY, tabWidth, tabHeight)
+      love.graphics.setColor(1, 1, 1)
+      love.graphics.rectangle("line", tabX, tabY, tabWidth, tabHeight)
+      love.graphics.printf(tab.label, tabX, tabY + (tabHeight - fontHeight) / 2, tabWidth, "center")
+      leaderboardTabBounds[index] = { x = tabX, y = tabY, w = tabWidth, h = tabHeight }
+    end
+
+    local contentTop = viewportY + tabHeight + padding
+    love.graphics.printf(activeTab.label, viewportX, contentTop - fontHeight - 2, viewportWidth, "center")
+
+    local scissorX = viewportX
+    local scissorY = contentTop
+    local scissorHeight = viewportHeight - (contentTop - viewportY) - padding
+    love.graphics.setScissor(scissorX, scissorY, viewportWidth, scissorHeight)
+
+    local y = contentTop + headerHeight - leaderboardScroll
+    if #data == 0 then
+      love.graphics.printf("No entries yet.", viewportX, y, viewportWidth, "center")
+    else
+      for index, entry in ipairs(data) do
+        local color = entry.kind == winner and { 0.3, 0.85, 0.3 } or { 0.85, 0.3, 0.3 }
+        love.graphics.setColor(color)
+        local line = string.format("%d. %s (%s) - %d", index, entry.name, entry.kind, entry.kills)
+        love.graphics.printf(line, viewportX + 12, y, viewportWidth - 24, "left")
         y = y + rowHeight
       end
-      love.graphics.setScissor()
     end
+
+    love.graphics.setScissor()
+    love.graphics.setColor(1, 1, 1)
+  else
+    leaderboardTabBounds = {}
+    leaderboardMaxScroll = 0
+    leaderboardScroll = 0
   end
 end
 
 function module.keypressed(key)
   if key == "r" then
     module.start()
+    return
+  end
+
+  if spawnCompleteAnnounced and #getActiveTypes() == 1 then
+    if key == "tab" or key == "right" then
+      leaderboardActiveTab = leaderboardActiveTab + 1
+      if leaderboardActiveTab > 2 then
+        leaderboardActiveTab = 1
+      end
+      leaderboardScroll = 0
+    elseif key == "left" then
+      leaderboardActiveTab = leaderboardActiveTab - 1
+      if leaderboardActiveTab < 1 then
+        leaderboardActiveTab = 2
+      end
+      leaderboardScroll = 0
+    end
   end
 end
 
 function module.wheelmoved(_, y)
-  if not spawnCompleteAnnounced then
+  if not spawnCompleteAnnounced or leaderboardMaxScroll <= 0 then
     return
   end
-  leaderboardScroll = leaderboardScroll - y * 20
+  leaderboardScroll = math.max(0, math.min(leaderboardScroll - y * 24, leaderboardMaxScroll))
+end
+
+function module.mousepressed(x, y, button)
+  if button ~= 1 then
+    return
+  end
+  if not spawnCompleteAnnounced or #getActiveTypes() ~= 1 then
+    return
+  end
+
+  for index, bounds in ipairs(leaderboardTabBounds) do
+    if bounds and x >= bounds.x and x <= bounds.x + bounds.w and y >= bounds.y and y <= bounds.y + bounds.h then
+      leaderboardActiveTab = index
+      leaderboardScroll = 0
+      break
+    end
+  end
 end
 
 return module

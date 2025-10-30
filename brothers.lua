@@ -1,18 +1,20 @@
 local module = {}
 
 local PADDING = 24
-local SPEED = 220
-local GRAVITY = 10
+local SPEED = 240
+local GRAVITY = 800
 local RECT_WIDTH = 80
 local RECT_HEIGHT = 40
+local BASE_HEIGHT = RECT_HEIGHT
 
 local rect
 local lineY
 local jumpTimer = 0
 local jumpHoldAccum = 0
 local jumpWasHeld = false
-local JUMP_ACCEL = 20
-local JUMP_DURATION = 1
+local JUMP_ACCEL = 100
+local JUMP_START_VELOCITY = -280
+local JUMP_DURATION = 0.2
 
 function module.load()
   rect = nil
@@ -31,6 +33,7 @@ function module.start()
     x = (windowWidth - RECT_WIDTH) / 2,
     y = lineY - RECT_HEIGHT,
     vy = 0,
+    squished = false,
   }
   jumpTimer = 0
   jumpHoldAccum = 0
@@ -54,10 +57,7 @@ function module.update(dt)
   lineY = windowHeight * 0.6
 
   local floorY = lineY - rect.height
-  local onGround = rect.y >= floorY - 0.5
-  if rect.vy ~= 0 then
-    onGround = false
-  end
+  local onGround = math.abs(rect.y - floorY) <= 0.5 and math.abs(rect.vy) < 0.1
 
   local jumpHeld = love.keyboard.isDown("w") or love.keyboard.isDown("up") or love.keyboard.isDown("space")
 
@@ -67,11 +67,14 @@ function module.update(dt)
 
   if jumpHeld and not jumpWasHeld and onGround then
     jumpTimer = JUMP_DURATION
+    rect.vy = JUMP_START_VELOCITY
   end
 
-  if jumpTimer > 0 then
+  if jumpTimer > 0 and jumpHeld then
     rect.vy = rect.vy - JUMP_ACCEL * dt
     jumpTimer = math.max(0, jumpTimer - dt)
+  else
+    jumpTimer = 0
   end
 
   rect.vy = rect.vy + GRAVITY * dt
@@ -81,6 +84,7 @@ function module.update(dt)
   if rect.y > floorY then
     rect.y = floorY
     rect.vy = 0
+    jumpTimer = 0
   end
 
   local moveLeft = love.keyboard.isDown("left") or love.keyboard.isDown("a")
@@ -91,7 +95,24 @@ function module.update(dt)
     rect.x = rect.x + SPEED * dt
   end
 
+  local downHeld = love.keyboard.isDown("down") or love.keyboard.isDown("s")
+  if downHeld and onGround then
+    if not rect.squished then
+      rect.height = BASE_HEIGHT / 2
+      rect.squished = true
+      rect.y = lineY - rect.height
+    end
+  elseif rect.squished then
+    rect.height = BASE_HEIGHT
+    rect.squished = false
+    rect.y = math.min(rect.y, lineY - rect.height)
+  end
+
   rect.x = math.max(PADDING, math.min(rect.x, windowWidth - PADDING - rect.width))
+
+  if jumpWasHeld and not jumpHeld then
+    jumpHoldAccum = 0
+  end
 
   jumpWasHeld = jumpHeld
 end
