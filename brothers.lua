@@ -9,6 +9,9 @@ local BASE_HEIGHT = RECT_HEIGHT
 
 local rect
 local lineY
+local cameraX = 0
+local shapes = {}
+local nextSpawnX = 0
 local jumpTimer = 0
 local jumpHoldAccum = 0
 local jumpWasHeld = false
@@ -19,6 +22,9 @@ local JUMP_DURATION = 0.2
 function module.load()
   rect = nil
   lineY = nil
+  cameraX = 0
+  shapes = {}
+  nextSpawnX = 0
   jumpTimer = 0
   jumpHoldAccum = 0
   jumpWasHeld = false
@@ -35,6 +41,9 @@ function module.start()
     vy = 0,
     squished = false,
   }
+  cameraX = rect.x + rect.width / 2 - windowWidth / 2
+  shapes = {}
+  nextSpawnX = rect.x + rect.width + 100
   jumpTimer = 0
   jumpHoldAccum = 0
   jumpWasHeld = false
@@ -43,6 +52,9 @@ end
 function module.stop()
   rect = nil
   lineY = nil
+  cameraX = 0
+  shapes = {}
+  nextSpawnX = 0
   jumpTimer = 0
   jumpHoldAccum = 0
   jumpWasHeld = false
@@ -108,13 +120,29 @@ function module.update(dt)
     rect.y = math.min(rect.y, lineY - rect.height)
   end
 
-  rect.x = math.max(PADDING, math.min(rect.x, windowWidth - PADDING - rect.width))
+  rect.x = math.max(PADDING, rect.x)
 
   if jumpWasHeld and not jumpHeld then
     jumpHoldAccum = 0
   end
 
   jumpWasHeld = jumpHeld
+
+  cameraX = rect.x + rect.width / 2 - windowWidth / 2
+
+  while nextSpawnX <= rect.x + windowWidth * 1.5 do
+    local size = 30
+    local shapeType = ({ "circle", "square", "triangle" })[love.math.random(3)]
+    local x = nextSpawnX
+    local y = lineY - size
+    shapes[#shapes + 1] = {
+      type = shapeType,
+      x = x,
+      y = y,
+      size = size,
+    }
+    nextSpawnX = nextSpawnX + 100
+  end
 end
 
 function module.draw()
@@ -123,10 +151,35 @@ function module.draw()
   end
 
   local windowWidth = love.graphics.getWidth()
+  local windowHeight = love.graphics.getHeight()
+
+  love.graphics.push()
+  love.graphics.translate(-math.floor(cameraX), 0)
 
   love.graphics.setColor(1, 1, 1)
-  love.graphics.rectangle("fill", 0, lineY, windowWidth, 4)
+  love.graphics.rectangle("fill", cameraX - windowWidth, lineY, windowWidth * 3, 4)
+
+  love.graphics.setColor(0.6, 0, 0.9)
+  for _, shape in ipairs(shapes) do
+    if shape.type == "circle" then
+      love.graphics.circle("fill", shape.x, shape.y + shape.size / 2, shape.size / 2)
+    elseif shape.type == "square" then
+      love.graphics.rectangle("fill", shape.x - shape.size / 2, shape.y, shape.size, shape.size)
+    else
+      local half = shape.size / 2
+      local points = {
+        shape.x, shape.y,
+        shape.x - half, shape.y + shape.size,
+        shape.x + half, shape.y + shape.size,
+      }
+      love.graphics.polygon("fill", points)
+    end
+  end
+
+  love.graphics.setColor(1, 1, 1)
   love.graphics.rectangle("fill", rect.x, rect.y, rect.width, rect.height)
+
+  love.graphics.pop()
 
   love.graphics.print(string.format("Jump hold time: %.2f", jumpHoldAccum), PADDING, PADDING)
 end
