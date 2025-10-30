@@ -8,10 +8,18 @@ local RECT_HEIGHT = 40
 
 local rect
 local lineY
+local jumpTimer = 0
+local jumpHoldAccum = 0
+local jumpWasHeld = false
+local JUMP_ACCEL = 20
+local JUMP_DURATION = 1
 
 function module.load()
   rect = nil
   lineY = nil
+  jumpTimer = 0
+  jumpHoldAccum = 0
+  jumpWasHeld = false
 end
 
 function module.start()
@@ -24,11 +32,17 @@ function module.start()
     y = lineY - RECT_HEIGHT,
     vy = 0,
   }
+  jumpTimer = 0
+  jumpHoldAccum = 0
+  jumpWasHeld = false
 end
 
 function module.stop()
   rect = nil
   lineY = nil
+  jumpTimer = 0
+  jumpHoldAccum = 0
+  jumpWasHeld = false
 end
 
 function module.update(dt)
@@ -39,17 +53,38 @@ function module.update(dt)
   local windowWidth, windowHeight = love.graphics.getDimensions()
   lineY = windowHeight * 0.6
 
+  local floorY = lineY - rect.height
+  local onGround = rect.y >= floorY - 0.5
+  if rect.vy ~= 0 then
+    onGround = false
+  end
+
+  local jumpHeld = love.keyboard.isDown("w") or love.keyboard.isDown("up") or love.keyboard.isDown("space")
+
+  if jumpHeld then
+    jumpHoldAccum = jumpHoldAccum + dt
+  end
+
+  if jumpHeld and not jumpWasHeld and onGround then
+    jumpTimer = JUMP_DURATION
+  end
+
+  if jumpTimer > 0 then
+    rect.vy = rect.vy - JUMP_ACCEL * dt
+    jumpTimer = math.max(0, jumpTimer - dt)
+  end
+
   rect.vy = rect.vy + GRAVITY * dt
   rect.y = rect.y + rect.vy * dt
 
-  local floorY = lineY - rect.height
+  floorY = lineY - rect.height
   if rect.y > floorY then
     rect.y = floorY
     rect.vy = 0
   end
 
-  local moveLeft = love.keyboard.isDown("left") or love.keyboard.isDown("d")
-  local moveRight = love.keyboard.isDown("right") or love.keyboard.isDown("a")
+  local moveLeft = love.keyboard.isDown("left") or love.keyboard.isDown("a")
+  local moveRight = love.keyboard.isDown("right") or love.keyboard.isDown("d")
   if moveLeft and not moveRight then
     rect.x = rect.x - SPEED * dt
   elseif moveRight and not moveLeft then
@@ -57,6 +92,8 @@ function module.update(dt)
   end
 
   rect.x = math.max(PADDING, math.min(rect.x, windowWidth - PADDING - rect.width))
+
+  jumpWasHeld = jumpHeld
 end
 
 function module.draw()
@@ -69,6 +106,8 @@ function module.draw()
   love.graphics.setColor(1, 1, 1)
   love.graphics.rectangle("fill", 0, lineY, windowWidth, 4)
   love.graphics.rectangle("fill", rect.x, rect.y, rect.width, rect.height)
+
+  love.graphics.print(string.format("Jump hold time: %.2f", jumpHoldAccum), PADDING, PADDING)
 end
 
 return module

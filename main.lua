@@ -170,3 +170,9 @@ function love.keypressed(key)
     rockpaperscissors.keypressed(key)
   end
 end
+
+function love.wheelmoved(x, y)
+  if state == "playing_rps" or state == "paused_rps" then
+    rockpaperscissors.wheelmoved(x, y)
+  end
+end

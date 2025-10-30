@@ -29,6 +29,8 @@ local scales = {}
 local resultsRecorded = false
 local aliveLookup = {}
 local spawnCompleteAnnounced = false
+local playerStats = {}
+local leaderboardScroll = 0
 
 local function resetGameState()
   spawnQueue = {}
@@ -39,6 +41,7 @@ local function resetGameState()
   timeUntilNextSpawn = nil
   resultsRecorded = false
   spawnCompleteAnnounced = false
+  leaderboardScroll = 0
 end
 
 local function getActiveTypes()
@@ -216,7 +219,7 @@ local function refreshTargetsForAll()
 end
 
 local function growEntity(entity)
-  entity.scale = entity.scale * 1.1
+  entity.scale = entity.scale * 1.2
   entity.width = entity.image:getWidth() * entity.scale
   entity.height = entity.image:getHeight() * entity.scale
 
@@ -243,12 +246,18 @@ local function handleEntityCollisions()
               a.kills = a.kills + 1
               growEntity(a)
               emitDeathEvent(b)
+              if playerStats[a.playerName] then
+                playerStats[a.playerName].kills = playerStats[a.playerName].kills + 1
+              end
               aliveCounts[b.kind] = math.max(0, aliveCounts[b.kind] - 1)
             elseif BEATS[b.kind] == a.kind then
               a.dead = true
               b.kills = b.kills + 1
               growEntity(b)
               emitDeathEvent(a)
+              if playerStats[b.playerName] then
+                playerStats[b.playerName].kills = playerStats[b.playerName].kills + 1
+              end
               aliveCounts[a.kind] = math.max(0, aliveCounts[a.kind] - 1)
               break
             else
@@ -355,6 +364,12 @@ local function spawnEntity(entry)
   local scaledWidth = imageWidth * scale
   local scaledHeight = imageHeight * scale
 
+  if not playerStats[entry.playerName] then
+    playerStats[entry.playerName] = { name = entry.playerName, kind = entry.kind, kills = 0 }
+  else
+    playerStats[entry.playerName].kind = entry.kind
+  end
+
   local minX, minY, maxX, maxY = getPlayfieldBounds()
   local maxSpawnX = math.max(minX, maxX - scaledWidth)
   local maxSpawnY = math.max(minY, maxY - scaledHeight)
@@ -440,6 +455,8 @@ end
 function module.start()
   love.math.setRandomSeed(os.time())
   resetGameState()
+  playerStats = {}
+  leaderboardScroll = 0
 
   windowWidth, windowHeight = love.graphics.getDimensions()
   local maxSpriteWidth = windowWidth * 0.05
@@ -478,6 +495,8 @@ end
 
 function module.stop()
   resetGameState()
+  leaderboardScroll = 0
+  playerStats = {}
 end
 
 function module.update(dt)
@@ -575,6 +594,13 @@ function module.draw()
     aliveCounts.Rock,
     aliveCounts.Scissors
   )
+
+  local hasWinner = not timeUntilNextSpawn and #spawnedEntities > 0 and #activeTypes == 1
+  if hasWinner then
+    local winner = activeTypes[1]
+    countersText = string.format("%s | Winner: %s | Press R to reset", countersText, winner)
+  end
+
   love.graphics.print(countersText, PADDING, PADDING)
 
   love.graphics.rectangle("line", minX, minY, maxX - minX, maxY - minY)
@@ -589,7 +615,6 @@ function module.draw()
   end
 
   local twoLeft = not timeUntilNextSpawn and #activeTypes == 2
-  local hasWinner = not timeUntilNextSpawn and #spawnedEntities > 0 and #activeTypes == 1
   if twoLeft then
     love.graphics.setFont(infoFont)
     local alert = "Only two left!!"
@@ -597,27 +622,44 @@ function module.draw()
   end
 
   if hasWinner then
-    local winner = activeTypes[1]
-    local centerX = minX + (maxX - minX) / 2
-    local centerY = minY + (maxY - minY) / 2
+    local statsList = {}
+    for _, data in pairs(playerStats) do
+      if data.kills > 0 then
+        statsList[#statsList + 1] = data
+      end
+    end
+    table.sort(statsList, function(a, b)
+      if a.kills == b.kills then
+        return a.name < b.name
+      end
+      return a.kills > b.kills
+    end)
 
-    love.graphics.setFont(victoryFont)
-    local message = string.format("%s wins!!", winner)
-    local messageWidth = victoryFont:getWidth(message)
-    local messageHeight = victoryFont:getHeight()
-    love.graphics.print(message, centerX - messageWidth / 2, centerY - messageHeight - 10)
+    if #statsList > 0 then
+      local fontHeight = infoFont:getHeight()
+      local rowHeight = fontHeight + 4
+      local headerHeight = fontHeight + 8
+      local totalHeight = headerHeight + #statsList * rowHeight
 
-    love.graphics.setFont(infoFont)
-    local buttonText = "Press R to reset"
-    local buttonPaddingX = 16
-    local buttonPaddingY = 8
-    local buttonWidth = infoFont:getWidth(buttonText) + buttonPaddingX * 2
-    local buttonHeight = infoFont:getHeight() + buttonPaddingY * 2
-    local buttonX = centerX - buttonWidth / 2
-    local buttonY = centerY + 10
+      local viewportHeight = math.min(windowHeight * 0.6, totalHeight)
+      local viewportWidth = math.min(420, windowWidth - 2 * PADDING)
+      local viewportX = (windowWidth - viewportWidth) / 2
+      local viewportY = (windowHeight - viewportHeight) / 2
 
-    love.graphics.rectangle("line", buttonX, buttonY, buttonWidth, buttonHeight)
-    love.graphics.print(buttonText, buttonX + buttonPaddingX, buttonY + buttonPaddingY)
+      leaderboardScroll = math.max(0, math.min(leaderboardScroll, math.max(0, totalHeight - viewportHeight)))
+
+      love.graphics.rectangle("line", viewportX, viewportY, viewportWidth, viewportHeight)
+      love.graphics.printf("Leaderboard", viewportX, viewportY + 4, viewportWidth, "center")
+
+      love.graphics.setScissor(viewportX, viewportY + headerHeight, viewportWidth, viewportHeight - headerHeight)
+      local y = viewportY + headerHeight - leaderboardScroll
+      for index, data in ipairs(statsList) do
+        local line = string.format("%d. %s (%s) - %d", index, data.name, data.kind, data.kills)
+        love.graphics.printf(line, viewportX + 8, y, viewportWidth - 16, "left")
+        y = y + rowHeight
+      end
+      love.graphics.setScissor()
+    end
   end
 end
 
@@ -625,6 +667,13 @@ function module.keypressed(key)
   if key == "r" then
     module.start()
   end
+end
+
+function module.wheelmoved(_, y)
+  if not spawnCompleteAnnounced then
+    return
+  end
+  leaderboardScroll = leaderboardScroll - y * 20
 end
 
 return module
