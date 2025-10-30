@@ -30,8 +30,17 @@ local spawnCompleteAnnounced = false
 local gameState = "menu"
 local menuButtons = {
   { label = "Play the Game", action = "play" },
+  { label = "Play the Brothers", action = "play_brothers" },
   { label = "Options", action = "options" },
 }
+local pauseButtons = {
+  { label = "Resume", action = "resume" },
+  { label = "Main Menu", action = "main_menu" },
+  { label = "Options", action = "options" },
+}
+local brothersRect
+local brothersLineY
+local BROTHERS_SPEED = 220
 
 local function resetGameState()
   spawnQueue = {}
@@ -42,6 +51,8 @@ local function resetGameState()
   timeUntilNextSpawn = nil
   resultsRecorded = false
   spawnCompleteAnnounced = false
+  brothersRect = nil
+  brothersLineY = nil
 end
 
 local function getActiveTypes()
@@ -465,6 +476,21 @@ local function startGame()
   end
 end
 
+local function startBrothers()
+  resetGameState()
+  gameState = "brothers"
+  windowWidth, windowHeight = love.graphics.getDimensions()
+  local rectWidth = 80
+  local rectHeight = 40
+  brothersLineY = windowHeight * 0.6
+  brothersRect = {
+    width = rectWidth,
+    height = rectHeight,
+    x = (windowWidth - rectWidth) / 2,
+    y = brothersLineY - rectHeight,
+  }
+end
+
 function love.load()
   love.graphics.setBackgroundColor(0.1, 0.1, 0.12)
 
@@ -483,10 +509,10 @@ function love.load()
   gameState = "menu"
 end
 
-local function drawMenu()
+local function drawMenu(isPause)
   windowWidth, windowHeight = love.graphics.getDimensions()
 
-  local title = "Welcome to Rock Paper Scissors"
+  local title = isPause and "Paused" or "Welcome to Rock Paper Scissors"
   love.graphics.setColor(1, 1, 1)
   love.graphics.setFont(victoryFont)
   local titleWidth = victoryFont:getWidth(title)
@@ -495,12 +521,13 @@ local function drawMenu()
   love.graphics.print(title, titleX, titleY)
 
   love.graphics.setFont(infoFont)
+  local buttons = isPause and pauseButtons or menuButtons
   local buttonWidth = 260
   local buttonHeight = 60
   local startY = windowHeight * 0.4
   local spacing = 20
 
-  for index, button in ipairs(menuButtons) do
+  for index, button in ipairs(buttons) do
     local bx = (windowWidth - buttonWidth) / 2
     local by = startY + (index - 1) * (buttonHeight + spacing)
     button.x, button.y = bx, by
@@ -518,6 +545,23 @@ local function drawMenu()
 end
 
 function love.update(dt)
+  if gameState == "brothers" then
+    windowWidth, windowHeight = love.graphics.getDimensions()
+    brothersLineY = windowHeight * 0.6
+    if brothersRect then
+      brothersRect.y = brothersLineY - brothersRect.height
+      local moveLeft = love.keyboard.isDown("left") or love.keyboard.isDown("d")
+      local moveRight = love.keyboard.isDown("right") or love.keyboard.isDown("a")
+      if moveLeft and not moveRight then
+        brothersRect.x = brothersRect.x - BROTHERS_SPEED * dt
+      elseif moveRight and not moveLeft then
+        brothersRect.x = brothersRect.x + BROTHERS_SPEED * dt
+      end
+      brothersRect.x = math.max(PADDING, math.min(brothersRect.x, windowWidth - PADDING - brothersRect.width))
+    end
+    return
+  end
+
   if gameState ~= "playing" then
     return
   end
@@ -602,14 +646,28 @@ function love.update(dt)
 end
 
 function love.draw()
-  if gameState ~= "playing" then
+  windowWidth, windowHeight = love.graphics.getDimensions()
+  love.graphics.setColor(1, 1, 1)
+
+  if gameState == "menu" then
     drawMenu()
     return
   end
 
-  windowWidth, windowHeight = love.graphics.getDimensions()
+  if gameState == "paused" then
+    drawMenu(true)
+    return
+  end
+
+  if gameState == "brothers" then
+    if brothersRect then
+      love.graphics.rectangle("fill", 0, brothersLineY, windowWidth, 4)
+      love.graphics.rectangle("fill", brothersRect.x, brothersRect.y, brothersRect.width, brothersRect.height)
+    end
+    return
+  end
+
   love.graphics.setFont(infoFont)
-  love.graphics.setColor(1, 1, 1)
 
   local minX, minY, maxX, maxY, _, lineSpacing = getPlayfieldBounds()
   local activeTypes = getActiveTypes()
@@ -634,7 +692,7 @@ function love.draw()
   end
 
   local twoLeft = not timeUntilNextSpawn and #activeTypes == 2
-  local hasWinner = not timeUntilNextSpawn and #activeTypes == 1 and #spawnedEntities > 0
+  local hasWinner = not timeUntilNextSpawn and #spawnedEntities > 0 and #activeTypes == 1
   if twoLeft then
     love.graphics.setFont(infoFont)
     local alert = "Only two left!!"
@@ -667,6 +725,18 @@ function love.draw()
 end
 
 function love.keypressed(key)
+  if key == "escape" then
+    if gameState == "playing" then
+      gameState = "paused"
+    elseif gameState == "paused" then
+      gameState = "playing"
+    elseif gameState == "brothers" then
+      resetGameState()
+      gameState = "menu"
+    end
+    return
+  end
+
   if key == "r" and gameState == "playing" then
     startGame()
   end
@@ -682,6 +752,22 @@ function love.mousepressed(x, y, button)
       if btn.x and x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
         if btn.action == "play" then
           startGame()
+        elseif btn.action == "play_brothers" then
+          startBrothers()
+        elseif btn.action == "options" then
+          print("Options menu not implemented yet.")
+        end
+        break
+      end
+    end
+  elseif gameState == "paused" then
+    for _, btn in ipairs(pauseButtons) do
+      if btn.x and x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
+        if btn.action == "resume" then
+          gameState = "playing"
+        elseif btn.action == "main_menu" then
+          resetGameState()
+          gameState = "menu"
         elseif btn.action == "options" then
           print("Options menu not implemented yet.")
         end
