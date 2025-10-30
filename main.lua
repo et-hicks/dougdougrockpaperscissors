@@ -27,6 +27,22 @@ local scales = {}
 local resultsRecorded = false
 local aliveLookup = {}
 local spawnCompleteAnnounced = false
+local gameState = "menu"
+local menuButtons = {
+  { label = "Play the Game", action = "play" },
+  { label = "Options", action = "options" },
+}
+
+local function resetGameState()
+  spawnQueue = {}
+  spawnedEntities = {}
+  aliveLookup = {}
+  aliveCounts = { Paper = 0, Rock = 0, Scissors = 0 }
+  nextSpawnIndex = 1
+  timeUntilNextSpawn = nil
+  resultsRecorded = false
+  spawnCompleteAnnounced = false
+end
 
 local function getActiveTypes()
   local active = {}
@@ -48,8 +64,12 @@ local function getPlayfieldBounds()
   return minX, minY, maxX, maxY, countersHeight, lineSpacing
 end
 
-local function addAliveRecord(entity)
-  aliveLookup[entity.playerName] = entity
+local function addAliveRecord(entity, centerX, centerY)
+  aliveLookup[entity.playerName] = {
+    entity = entity,
+    spawnX = centerX,
+    spawnY = centerY,
+  }
 end
 
 local function removeAliveRecord(entity)
@@ -128,8 +148,9 @@ end
 
 local function chooseRandomEnemyTarget(entity)
   local preferred, fallback = {}, {}
-  for _, candidate in pairs(aliveLookup) do
-    if candidate ~= entity and not candidate.dead then
+  for _, record in pairs(aliveLookup) do
+    local candidate = record.entity
+    if candidate ~= entity and candidate and not candidate.dead then
       if candidate.kind ~= entity.kind then
         preferred[#preferred + 1] = candidate
       else
@@ -292,6 +313,16 @@ local function adjustEntitySpeeds()
   end
 end
 
+local function announceSpawningComplete()
+  if spawnCompleteAnnounced then
+    return
+  end
+  print("spawning done")
+  spawnCompleteAnnounced = true
+  adjustEntitySpeeds()
+  refreshTargetsForAll()
+end
+
 local function loadPlayerNames()
   playerNames = {}
 
@@ -349,6 +380,8 @@ local function spawnEntity(entry)
     vx = math.cos(angle) * DEFAULT_SPEED,
     vy = math.sin(angle) * DEFAULT_SPEED,
     kills = 0,
+    spawnX = centerX,
+    spawnY = centerY,
     targetEntity = nil,
     speed = DEFAULT_SPEED,
   }
@@ -392,23 +425,14 @@ local function recordSurvivors()
   resultsRecorded = true
 end
 
-function love.load()
-  love.graphics.setBackgroundColor(0.1, 0.1, 0.12)
-
-  infoFont = love.graphics.newFont(18)
-  victoryFont = love.graphics.newFont(32)
-
+local function startGame()
   love.math.setRandomSeed(os.time())
+  resetGameState()
 
+  gameState = "playing"
   windowWidth, windowHeight = love.graphics.getDimensions()
   local maxSpriteWidth = windowWidth * 0.05
   local maxSpriteHeight = windowHeight * 0.05
-
-  textures = {
-    Paper = love.graphics.newImage("assets/paper.png"),
-    Rock = love.graphics.newImage("assets/rock.png"),
-    Scissors = love.graphics.newImage("assets/scissors.png"),
-  }
 
   scales = {}
   for kind, image in pairs(textures) do
@@ -432,13 +456,8 @@ function love.load()
     }
   end
 
-  spawnedEntities = {}
-  aliveCounts = { Paper = 0, Rock = 0, Scissors = 0 }
   nextSpawnIndex = 1
   timeUntilNextSpawn = (#spawnQueue > 0) and SPAWN_DELAY or nil
-  resultsRecorded = false
-  spawnCompleteAnnounced = false
-  aliveLookup = {}
 
   local survivorFile = io.open(SURVIVOR_PATH, "w")
   if survivorFile then
@@ -446,7 +465,65 @@ function love.load()
   end
 end
 
+function love.load()
+  love.graphics.setBackgroundColor(0.1, 0.1, 0.12)
+
+  infoFont = love.graphics.newFont(18)
+  victoryFont = love.graphics.newFont(32)
+
+  love.math.setRandomSeed(os.time())
+
+  textures = {
+    Paper = love.graphics.newImage("assets/paper.png"),
+    Rock = love.graphics.newImage("assets/rock.png"),
+    Scissors = love.graphics.newImage("assets/scissors.png"),
+  }
+
+  resetGameState()
+  gameState = "menu"
+end
+
+local function drawMenu()
+  windowWidth, windowHeight = love.graphics.getDimensions()
+
+  local title = "Welcome to Rock Paper Scissors"
+  love.graphics.setColor(1, 1, 1)
+  love.graphics.setFont(victoryFont)
+  local titleWidth = victoryFont:getWidth(title)
+  local titleX = (windowWidth - titleWidth) / 2
+  local titleY = windowHeight * 0.2
+  love.graphics.print(title, titleX, titleY)
+
+  love.graphics.setFont(infoFont)
+  local buttonWidth = 260
+  local buttonHeight = 60
+  local startY = windowHeight * 0.4
+  local spacing = 20
+
+  for index, button in ipairs(menuButtons) do
+    local bx = (windowWidth - buttonWidth) / 2
+    local by = startY + (index - 1) * (buttonHeight + spacing)
+    button.x, button.y = bx, by
+    button.w, button.h = buttonWidth, buttonHeight
+
+    love.graphics.rectangle("line", bx, by, buttonWidth, buttonHeight)
+    love.graphics.printf(
+      button.label,
+      bx,
+      by + (buttonHeight - infoFont:getHeight()) / 2,
+      buttonWidth,
+      "center"
+    )
+  end
+end
+
 function love.update(dt)
+  if gameState ~= "playing" then
+    return
+  end
+
+  windowWidth, windowHeight = love.graphics.getDimensions()
+
   if timeUntilNextSpawn then
     timeUntilNextSpawn = timeUntilNextSpawn - dt
 
@@ -460,80 +537,77 @@ function love.update(dt)
         timeUntilNextSpawn = SPAWN_DELAY
       else
         timeUntilNextSpawn = nil
-        if not spawnCompleteAnnounced and nextSpawnIndex > #spawnQueue then
-          print("spawning done")
-          spawnCompleteAnnounced = true
-          adjustEntitySpeeds()
-          refreshTargetsForAll()
-        end
+        announceSpawningComplete()
       end
     end
-  else
-    if not spawnCompleteAnnounced and nextSpawnIndex > #spawnQueue then
-      print("spawning done")
-      spawnCompleteAnnounced = true
-      adjustEntitySpeeds()
-      refreshTargetsForAll()
+    return
+  end
+
+  announceSpawningComplete()
+
+  adjustEntitySpeeds()
+  local minX, minY, maxX, maxY = getPlayfieldBounds()
+
+  if spawnCompleteAnnounced then
+    for _, entity in ipairs(spawnedEntities) do
+      ensureTargetForEntity(entity)
+    end
+  end
+
+  for _, entity in ipairs(spawnedEntities) do
+    entity.x = entity.x + entity.vx * dt
+    entity.y = entity.y + entity.vy * dt
+
+    if entity.x <= minX then
+      entity.x = minX
+      entity.vx = math.abs(entity.vx)
+    elseif entity.x + entity.width >= maxX then
+      entity.x = maxX - entity.width
+      entity.vx = -math.abs(entity.vx)
     end
 
-    adjustEntitySpeeds()
-    local minX, minY, maxX, maxY = getPlayfieldBounds()
+    if entity.y <= minY then
+      entity.y = minY
+      entity.vy = math.abs(entity.vy)
+    elseif entity.y + entity.height >= maxY then
+      entity.y = maxY - entity.height
+      entity.vy = -math.abs(entity.vy)
+    end
 
-    if spawnCompleteAnnounced then
-      for _, entity in ipairs(spawnedEntities) do
+    if spawnCompleteAnnounced and entity.targetEntity then
+      local centerX = entity.x + entity.width / 2
+      local centerY = entity.y + entity.height / 2
+      local target = entity.targetEntity
+      local targetCenterX = target.x + target.width / 2
+      local targetCenterY = target.y + target.height / 2
+      local dx = targetCenterX - centerX
+      local dy = targetCenterY - centerY
+      local dist = math.sqrt(dx * dx + dy * dy)
+      local reachThreshold = (math.max(entity.width, entity.height) + math.max(target.width, target.height)) / 2 + 4
+      if dist <= reachThreshold then
+        entity.targetEntity = nil
         ensureTargetForEntity(entity)
       end
     end
+  end
 
-    for _, entity in ipairs(spawnedEntities) do
-      entity.x = entity.x + entity.vx * dt
-      entity.y = entity.y + entity.vy * dt
+  handleEntityCollisions()
+  removeDeadEntities()
+  adjustEntitySpeeds()
 
-      if entity.x <= minX then
-        entity.x = minX
-        entity.vx = math.abs(entity.vx)
-      elseif entity.x + entity.width >= maxX then
-        entity.x = maxX - entity.width
-        entity.vx = -math.abs(entity.vx)
-      end
-
-      if entity.y <= minY then
-        entity.y = minY
-        entity.vy = math.abs(entity.vy)
-      elseif entity.y + entity.height >= maxY then
-        entity.y = maxY - entity.height
-        entity.vy = -math.abs(entity.vy)
-      end
-
-      if spawnCompleteAnnounced and entity.targetEntity then
-        local centerX = entity.x + entity.width / 2
-        local centerY = entity.y + entity.height / 2
-        local target = entity.targetEntity
-        local targetCenterX = target.x + target.width / 2
-        local targetCenterY = target.y + target.height / 2
-        local dx = targetCenterX - centerX
-        local dy = targetCenterY - centerY
-        local dist = math.sqrt(dx * dx + dy * dy)
-        local reachThreshold = (math.max(entity.width, entity.height) + math.max(target.width, target.height)) / 2 + 4
-        if dist <= reachThreshold then
-          entity.targetEntity = nil
-          ensureTargetForEntity(entity)
-        end
-      end
-    end
-
-    handleEntityCollisions()
-    removeDeadEntities()
-    adjustEntitySpeeds()
-
-    local activeTypes = getActiveTypes()
-    if (not resultsRecorded) and #activeTypes <= 1 then
-      recordSurvivors()
-    end
+  local activeTypes = getActiveTypes()
+  if (not resultsRecorded) and #activeTypes <= 1 then
+    recordSurvivors()
   end
 end
 
 function love.draw()
+  if gameState ~= "playing" then
+    drawMenu()
+    return
+  end
+
+  windowWidth, windowHeight = love.graphics.getDimensions()
   love.graphics.setFont(infoFont)
   love.graphics.setColor(1, 1, 1)
 
@@ -593,7 +667,26 @@ function love.draw()
 end
 
 function love.keypressed(key)
-  if key == "r" then
-    love.load()
+  if key == "r" and gameState == "playing" then
+    startGame()
+  end
+end
+
+function love.mousepressed(x, y, button)
+  if button ~= 1 then
+    return
+  end
+
+  if gameState == "menu" then
+    for _, btn in ipairs(menuButtons) do
+      if btn.x and x >= btn.x and x <= btn.x + btn.w and y >= btn.y and y <= btn.y + btn.h then
+        if btn.action == "play" then
+          startGame()
+        elseif btn.action == "options" then
+          print("Options menu not implemented yet.")
+        end
+        break
+      end
+    end
   end
 end
