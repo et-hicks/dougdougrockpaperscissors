@@ -1,21 +1,18 @@
+local flags = require("rps_flags")
 local module = {}
 
-local SPAWN_DELAY = 0.1
-local DEFAULT_SPEED = 45
-local WIN_SPEED = 100
-local PADDING = 24
-local TEXT_GAP = 6
-local SIDEBAR_WIDTH = 400
-local SIDEBAR_GAP = 8
-local SHIELD_COLOR = { 0.3, 0.6, 1.0, 0.9 }
-local SHIELD_LINE_WIDTH = 2
-local SURVIVOR_PATH = "players/survivors.txt"
+local SPAWN_DELAY = flags.SPAWN_DELAY
+local DEFAULT_SPEED = flags.DEFAULT_SPEED
+local WIN_SPEED = flags.WIN_SPEED
+local PADDING = flags.PADDING
+local TEXT_GAP = flags.TEXT_GAP
+local SIDEBAR_WIDTH = flags.SIDEBAR_WIDTH
+local SIDEBAR_GAP = flags.SIDEBAR_GAP
+local SHIELD_COLOR = flags.SHIELD_COLOR
+local SHIELD_LINE_WIDTH = flags.SHIELD_LINE_WIDTH
+local SURVIVOR_PATH = flags.SURVIVOR_PATH
 
-local BEATS = {
-  Rock = "Scissors",
-  Paper = "Rock",
-  Scissors = "Paper",
-}
+local BEATS = flags.BEATS
 
 local orderedKinds = { "Paper", "Rock", "Scissors" }
 local spawnWeights = {
@@ -41,11 +38,18 @@ local CLASS_SHORTHAND = {
   Rock = "R",
   Scissors = "S",
 }
-local CLASS_BASE_SPEED_BONUS = {
-  Rock = 0.05,
-  Paper = 0.10,
-  Scissors = 0.20,
-}
+local CLASS_BASE_SPEED_BONUS = flags.CLASS_BASE_SPEED_BONUS
+local BASE_SHIELD_BONUS = flags.BASE_SHIELD_BONUS
+local ROCK_BONUS_SHIELD = flags.ROCK_BONUS_SHIELD
+local PAPER_SPEED_MULTIPLIER = flags.PAPER_SPEED_MULTIPLIER
+local SCISSORS_SPEED_DURATION = flags.SCISSORS_SPEED_DURATION
+local SCISSORS_SHRINK_PERCENT = flags.SCISSORS_SHRINK_PERCENT
+local SCISSORS_SHIELD_TWO_CHANCE = flags.SCISSORS_SHIELD_TWO_CHANCE
+local SCISSORS_SHIELD_ONE_THRESHOLD = flags.SCISSORS_SHIELD_ONE_THRESHOLD
+local SCISSORS_SHIELD_TWO_VALUE = flags.SCISSORS_SHIELD_TWO_VALUE
+local SCISSORS_SHIELD_ONE_VALUE = flags.SCISSORS_SHIELD_ONE_VALUE
+local SCISSORS_SHIELD_THREE_VALUE = flags.SCISSORS_SHIELD_THREE_VALUE
+local DEFAULT_SPEED_BONUS = flags.DEFAULT_SPEED_BONUS
 
 local infoFont
 local victoryFont
@@ -458,23 +462,23 @@ local function applyAttackBonuses(attacker, defender)
     return
   end
 
-  addShield(attacker, 1)
-  boostSpeed(attacker, CLASS_BASE_SPEED_BONUS[attacker.kind] or 0.05)
+  addShield(attacker, BASE_SHIELD_BONUS)
+  boostSpeed(attacker, CLASS_BASE_SPEED_BONUS[attacker.kind] or DEFAULT_SPEED_BONUS)
 
   if attacker.kind == "Rock" and defender.kind == "Scissors" then
-    addShield(attacker, 2)
+    addShield(attacker, ROCK_BONUS_SHIELD)
   elseif attacker.kind == "Paper" and defender.kind == "Rock" then
-    boostSpeed(attacker, 0.30)
+    boostSpeed(attacker, PAPER_SPEED_MULTIPLIER)
   elseif attacker.kind == "Scissors" and defender.kind == "Paper" then
-    boostSpeed(attacker, 0.10)
-    shrinkEntityByPercent(attacker, 0.05)
+    boostSpeed(attacker, SCISSORS_SPEED_DURATION)
+    shrinkEntityByPercent(attacker, SCISSORS_SHRINK_PERCENT)
     local roll = love.math.random()
-    if roll <= 0.5 then
-      addShield(attacker, 2)
-    elseif roll <= 0.8 then
-      addShield(attacker, 1)
+    if roll <= SCISSORS_SHIELD_TWO_CHANCE then
+      addShield(attacker, SCISSORS_SHIELD_TWO_VALUE)
+    elseif roll <= SCISSORS_SHIELD_ONE_THRESHOLD then
+      addShield(attacker, SCISSORS_SHIELD_ONE_VALUE)
     else
-      addShield(attacker, 3)
+      addShield(attacker, SCISSORS_SHIELD_THREE_VALUE)
     end
   end
 end
