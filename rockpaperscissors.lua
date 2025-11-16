@@ -32,14 +32,19 @@ local function getKillSpeedMultiplier(entity)
   return 1 + 0.1 * kills
 end
 
-local function getSpeedBonusMultiplier(entity)
-  return (entity and entity.speedBonus) or 1
+local function getSpeedBonus(entity)
+  return (entity and entity.speedBonus) or 0
 end
 
 local CLASS_SHORTHAND = {
   Paper = "P",
   Rock = "R",
-  Scissors = "C",
+  Scissors = "S",
+}
+local CLASS_BASE_SPEED_BONUS = {
+  Rock = 0.05,
+  Paper = 0.10,
+  Scissors = 0.20,
 }
 
 local infoFont
@@ -131,10 +136,11 @@ end
 
 local function setEntitySpeed(entity, speed)
   entity.baseSpeed = speed or entity.baseSpeed or 0
-  local effectiveSpeed = entity.baseSpeed
-  if effectiveSpeed and effectiveSpeed > 0 then
-    effectiveSpeed = effectiveSpeed * getKillSpeedMultiplier(entity) * getSpeedBonusMultiplier(entity)
+  local effectiveSpeed = entity.baseSpeed or 0
+  if effectiveSpeed > 0 then
+    effectiveSpeed = effectiveSpeed * getKillSpeedMultiplier(entity)
   end
+  effectiveSpeed = effectiveSpeed + getSpeedBonus(entity)
 
   entity.speed = effectiveSpeed or 0
   if not effectiveSpeed or effectiveSpeed <= 0 then
@@ -166,7 +172,7 @@ local function boostSpeed(entity, percent)
   if not entity or not percent or percent == 0 then
     return
   end
-  entity.speedBonus = (entity.speedBonus or 1) * (1 + percent)
+  entity.speedBonus = (entity.speedBonus or 0) + (DEFAULT_SPEED * percent)
   setEntitySpeed(entity, entity.baseSpeed or DEFAULT_SPEED)
 end
 
@@ -448,8 +454,12 @@ local function applyAttackBonuses(attacker, defender)
     return
   end
 
+  if not defender or BEATS[attacker.kind] ~= defender.kind then
+    return
+  end
+
   addShield(attacker, 1)
-  boostSpeed(attacker, 0.05)
+  boostSpeed(attacker, CLASS_BASE_SPEED_BONUS[attacker.kind] or 0.05)
 
   if attacker.kind == "Rock" and defender.kind == "Scissors" then
     addShield(attacker, 2)
@@ -737,7 +747,7 @@ local function spawnEntity(entry)
     targetEntity = nil,
     speed = DEFAULT_SPEED,
     baseSpeed = DEFAULT_SPEED,
-    speedBonus = 1,
+    speedBonus = 0,
     shield = 1,
   }
 
