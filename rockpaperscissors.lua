@@ -5,6 +5,8 @@ local DEFAULT_SPEED = 45
 local WIN_SPEED = 100
 local PADDING = 24
 local TEXT_GAP = 6
+local SIDEBAR_WIDTH = 220
+local SIDEBAR_GAP = 8
 local SHIELD_COLOR = { 0.3, 0.6, 1.0, 0.9 }
 local SHIELD_LINE_WIDTH = 2
 local SURVIVOR_PATH = "players/survivors.txt"
@@ -13,6 +15,12 @@ local BEATS = {
   Rock = "Scissors",
   Paper = "Rock",
   Scissors = "Paper",
+}
+
+local CLASS_SHORTHAND = {
+  Paper = "P",
+  Rock = "R",
+  Scissors = "C",
 }
 
 local orderedKinds = { "Paper", "Rock", "Scissors" }
@@ -49,6 +57,7 @@ local leaderboardScroll = 0
 local leaderboardActiveTab = 1
 local leaderboardTabBounds = {}
 local leaderboardMaxScroll = 0
+local debugPaused = false
 
 local function chooseSpawnKind()
   local roll = love.math.random()
@@ -75,6 +84,7 @@ local function resetGameState()
   leaderboardActiveTab = 1
   leaderboardTabBounds = {}
   leaderboardMaxScroll = 0
+  debugPaused = false
 end
 
 local function getActiveTypes()
@@ -92,8 +102,12 @@ local function getPlayfieldBounds()
   local lineSpacing = countersHeight + TEXT_GAP
   local minX = PADDING
   local minY = PADDING + countersHeight + TEXT_GAP + 16
-  local maxX = windowWidth - PADDING
-  local maxY = windowHeight - PADDING
+  local availableWidth = windowWidth - minX - SIDEBAR_WIDTH - SIDEBAR_GAP - PADDING
+  local availableHeight = windowHeight - minY - PADDING
+  local desiredSize = 700
+  local playfieldSize = math.min(desiredSize, availableWidth, availableHeight)
+  local maxX = minX + playfieldSize
+  local maxY = minY + playfieldSize
   return minX, minY, maxX, maxY, countersHeight, lineSpacing
 end
 
@@ -229,6 +243,115 @@ local function drawShield(entity)
   love.graphics.circle("line", centerX, centerY, radius)
   love.graphics.setLineWidth(prevLineWidth)
   love.graphics.setColor(prevR, prevG, prevB, prevA)
+end
+
+local function getActiveLeaderboardEntries()
+  local entries = {}
+  for _, entity in ipairs(spawnedEntities) do
+    entries[#entries + 1] = {
+      name = entity.playerName,
+      kind = entity.kind,
+      kills = entity.kills or 0,
+      shieldActive = entity.shieldActive,
+    }
+  end
+
+  table.sort(entries, function(a, b)
+    if a.kills == b.kills then
+      return a.name < b.name
+    end
+    return a.kills > b.kills
+  end)
+
+  return entries
+end
+
+local function drawSidebarLeaderboard(minY, maxY)
+  local panelWidth = SIDEBAR_WIDTH
+  local panelX = windowWidth - PADDING - panelWidth
+  local panelY = minY
+  local panelHeight = maxY - minY
+
+  love.graphics.setColor(0, 0, 0, 0.35)
+  love.graphics.rectangle("fill", panelX, panelY, panelWidth, panelHeight)
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.rectangle("line", panelX, panelY, panelWidth, panelHeight)
+
+  local title = "Leaderboard"
+  love.graphics.print(title, panelX + 10, panelY + 10)
+
+  local entries = getActiveLeaderboardEntries()
+  local textHeight = infoFont:getHeight()
+  local rowHeight = textHeight + 6
+  local y = panelY + 16 + textHeight
+  local tableX = panelX + 12
+  local tableWidth = panelWidth - 24
+  local panelBottom = panelY + panelHeight - 12
+
+  if #entries == 0 then
+    love.graphics.print("No active fighters", panelX + 10, y)
+    return
+  end
+
+  local maxNameChars = #"Name"
+  for _, entry in ipairs(entries) do
+    if #entry.name > maxNameChars then
+      maxNameChars = #entry.name
+    end
+  end
+  local nameColumnChars = maxNameChars + 3
+  local classColumnChars = #"Class"
+  local killsColumnChars = #"Kills"
+  local shieldColumnChars = #"Shield"
+
+  local function widthForChars(chars)
+    if chars <= 0 then
+      return 0
+    end
+    return infoFont:getWidth(string.rep("W", chars))
+  end
+
+  local columnWidths = {
+    widthForChars(nameColumnChars),
+    widthForChars(classColumnChars),
+    widthForChars(killsColumnChars),
+    widthForChars(shieldColumnChars),
+  }
+  local columnAlignments = { "left", "center", "center", "center" }
+  local columnOffsets = {}
+  local offset = tableX
+  for index, width in ipairs(columnWidths) do
+    columnOffsets[index] = offset
+    offset = offset + width
+  end
+
+  local function drawRow(columns, color)
+    if y + rowHeight > panelBottom then
+      return false
+    end
+    love.graphics.setColor(color or { 1, 1, 1, 1 })
+    for i = 1, #columns do
+      love.graphics.printf(columns[i], columnOffsets[i], y, columnWidths[i], columnAlignments[i])
+    end
+    y = y + rowHeight
+    return true
+  end
+
+  drawRow({ "Name", "Class", "Kills", "Shield" }, { 1, 1, 1, 1 })
+  drawRow({ string.rep("-", nameColumnChars), string.rep("-", classColumnChars), string.rep("-", killsColumnChars), string.rep("-", shieldColumnChars) }, { 0.8, 0.8, 0.8, 1 })
+
+  for _, entry in ipairs(entries) do
+    local shieldText = entry.shieldActive and "Up" or ""
+    local classText = CLASS_SHORTHAND[entry.kind] or "?"
+    local paddedName = string.format("%-" .. nameColumnChars .. "s", entry.name)
+    local paddedClass = string.format("%-" .. classColumnChars .. "s", classText)
+    local paddedKills = string.format("%-" .. killsColumnChars .. "s", tostring(entry.kills))
+    local paddedShield = string.format("%-" .. shieldColumnChars .. "s", shieldText)
+    if not drawRow({ paddedName, paddedClass, paddedKills, paddedShield }, { 0.85, 0.93, 1, 1 }) then
+      break
+    end
+  end
+  love.graphics.setColor(1, 1, 1, 1)
 end
 
 local function isColliding(a, b)
@@ -648,6 +771,10 @@ function module.stop()
 end
 
 function module.update(dt)
+  if debugPaused then
+    return
+  end
+
   if timeUntilNextSpawn then
     timeUntilNextSpawn = timeUntilNextSpawn - dt
 
@@ -772,6 +899,8 @@ function module.draw()
     end
   end
 
+  drawSidebarLeaderboard(minY, maxY)
+
   if twoLeft and not hasWinner then
     love.graphics.setFont(infoFont)
     local alert = "Only two left!!"
@@ -888,6 +1017,11 @@ end
 function module.keypressed(key)
   if key == "r" then
     module.start()
+    return
+  end
+
+  if key == "k" then
+    debugPaused = not debugPaused
     return
   end
 

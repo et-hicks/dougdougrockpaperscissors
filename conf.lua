@@ -1,5 +1,5 @@
 function love.conf(t)
-  t.window.width = 900
-  t.window.height = 700
+  t.window.width = 1200
+  t.window.height = 820
   t.window.title = "Rock Paper Scissors"
 end
