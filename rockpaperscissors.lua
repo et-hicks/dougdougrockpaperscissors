@@ -144,6 +144,75 @@ local function consumeShield(entity)
   return false
 end
 
+local function getEntityCenter(entity)
+  return entity.x + entity.width / 2, entity.y + entity.height / 2
+end
+
+local function findClosestEntityOfKind(entity, kind)
+  local closest
+  local bestDistSq
+  local ex, ey = getEntityCenter(entity)
+
+  for _, candidate in ipairs(spawnedEntities) do
+    if candidate ~= entity and not candidate.dead and candidate.kind == kind then
+      local cx, cy = getEntityCenter(candidate)
+      local dx = cx - ex
+      local dy = cy - ey
+      local distSq = dx * dx + dy * dy
+      if not bestDistSq or distSq < bestDistSq then
+        bestDistSq = distSq
+        closest = candidate
+      end
+    end
+  end
+
+  return closest
+end
+
+local function steerScissors(entity)
+  if entity.kind ~= "Scissors" or not spawnCompleteAnnounced then
+    return
+  end
+
+  if not entity.speed or entity.speed <= 0 then
+    return
+  end
+
+  local centerX, centerY = getEntityCenter(entity)
+  local dirX, dirY = 0, 0
+
+  local paperTarget = findClosestEntityOfKind(entity, "Paper")
+  if paperTarget then
+    local targetX, targetY = getEntityCenter(paperTarget)
+    local dx = targetX - centerX
+    local dy = targetY - centerY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    if dist > 0 then
+      dirX = dirX + dx / dist
+      dirY = dirY + dy / dist
+      entity.targetEntity = paperTarget
+    end
+  end
+
+  local rockThreat = findClosestEntityOfKind(entity, "Rock")
+  if rockThreat then
+    local threatX, threatY = getEntityCenter(rockThreat)
+    local dx = centerX - threatX
+    local dy = centerY - threatY
+    local dist = math.sqrt(dx * dx + dy * dy)
+    if dist > 0 then
+      dirX = dirX + dx / dist
+      dirY = dirY + dy / dist
+    end
+  end
+
+  local magnitude = math.sqrt(dirX * dirX + dirY * dirY)
+  if magnitude > 0 then
+    entity.vx = dirX / magnitude * entity.speed
+    entity.vy = dirY / magnitude * entity.speed
+  end
+end
+
 local function drawShield(entity)
   if not entity or not entity.shieldActive then
     return
@@ -608,6 +677,9 @@ function module.update(dt)
   if spawnCompleteAnnounced then
     for _, entity in ipairs(spawnedEntities) do
       ensureTargetForEntity(entity)
+      if entity.kind == "Scissors" then
+        steerScissors(entity)
+      end
     end
   end
 
