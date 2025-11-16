@@ -5,6 +5,8 @@ local DEFAULT_SPEED = 45
 local WIN_SPEED = 100
 local PADDING = 24
 local TEXT_GAP = 6
+local SHIELD_COLOR = { 0.3, 0.6, 1.0, 0.9 }
+local SHIELD_LINE_WIDTH = 2
 local SURVIVOR_PATH = "players/survivors.txt"
 
 local BEATS = {
@@ -14,6 +16,19 @@ local BEATS = {
 }
 
 local orderedKinds = { "Paper", "Rock", "Scissors" }
+local spawnWeights = {
+  { kind = "Rock", weight = 0.4 },
+  { kind = "Paper", weight = 0.3 },
+  { kind = "Scissors", weight = 0.3 },
+}
+
+local function getKillSpeedMultiplier(entity)
+  local kills = (entity and entity.kills) or 0
+  if kills <= 0 then
+    return 1
+  end
+  return 1 + 0.1 * kills
+end
 
 local infoFont
 local victoryFont
@@ -34,6 +49,18 @@ local leaderboardScroll = 0
 local leaderboardActiveTab = 1
 local leaderboardTabBounds = {}
 local leaderboardMaxScroll = 0
+
+local function chooseSpawnKind()
+  local roll = love.math.random()
+  local cumulative = 0
+  for _, entry in ipairs(spawnWeights) do
+    cumulative = cumulative + entry.weight
+    if roll <= cumulative then
+      return entry.kind
+    end
+  end
+  return spawnWeights[#spawnWeights].kind
+end
 
 local function resetGameState()
   spawnQueue = {}
@@ -85,8 +112,13 @@ local function removeAliveRecord(entity)
 end
 
 local function setEntitySpeed(entity, speed)
-  entity.speed = speed
-  if speed <= 0 then
+  local effectiveSpeed = speed
+  if effectiveSpeed and effectiveSpeed > 0 then
+    effectiveSpeed = effectiveSpeed * getKillSpeedMultiplier(entity)
+  end
+
+  entity.speed = effectiveSpeed or 0
+  if not effectiveSpeed or effectiveSpeed <= 0 then
     entity.vx, entity.vy = 0, 0
     return
   end
@@ -95,13 +127,39 @@ local function setEntitySpeed(entity, speed)
     local magnitude = math.sqrt(entity.vx * entity.vx + entity.vy * entity.vy)
     if magnitude == 0 then
       local angle = love.math.random() * 2 * math.pi
-      entity.vx = math.cos(angle) * speed
-      entity.vy = math.sin(angle) * speed
+      entity.vx = math.cos(angle) * effectiveSpeed
+      entity.vy = math.sin(angle) * effectiveSpeed
     else
-      entity.vx = entity.vx / magnitude * speed
-      entity.vy = entity.vy / magnitude * speed
+      entity.vx = entity.vx / magnitude * effectiveSpeed
+      entity.vy = entity.vy / magnitude * effectiveSpeed
     end
   end
+end
+
+local function consumeShield(entity)
+  if entity and not entity.dead and entity.shieldActive then
+    entity.shieldActive = false
+    return true
+  end
+  return false
+end
+
+local function drawShield(entity)
+  if not entity or not entity.shieldActive then
+    return
+  end
+
+  local centerX = entity.x + entity.width / 2
+  local centerY = entity.y + entity.height / 2
+  local radius = math.max(entity.width, entity.height) / 2 + 6
+  local prevLineWidth = love.graphics.getLineWidth()
+  local prevR, prevG, prevB, prevA = love.graphics.getColor()
+
+  love.graphics.setColor(SHIELD_COLOR)
+  love.graphics.setLineWidth(SHIELD_LINE_WIDTH)
+  love.graphics.circle("line", centerX, centerY, radius)
+  love.graphics.setLineWidth(prevLineWidth)
+  love.graphics.setColor(prevR, prevG, prevB, prevA)
 end
 
 local function isColliding(a, b)
@@ -248,24 +306,32 @@ local function handleEntityCollisions()
             a.vy, b.vy = b.vy, a.vy
           else
             if BEATS[a.kind] == b.kind then
-              b.dead = true
-              a.kills = a.kills + 1
-              growEntity(a)
-              emitDeathEvent(b)
-              if playerStats[a.playerName] then
-                playerStats[a.playerName].kills = playerStats[a.playerName].kills + 1
+              if consumeShield(b) then
+                separateEntities(a, b)
+              else
+                b.dead = true
+                a.kills = a.kills + 1
+                growEntity(a)
+                emitDeathEvent(b)
+                if playerStats[a.playerName] then
+                  playerStats[a.playerName].kills = playerStats[a.playerName].kills + 1
+                end
+                aliveCounts[b.kind] = math.max(0, aliveCounts[b.kind] - 1)
               end
-              aliveCounts[b.kind] = math.max(0, aliveCounts[b.kind] - 1)
             elseif BEATS[b.kind] == a.kind then
-              a.dead = true
-              b.kills = b.kills + 1
-              growEntity(b)
-              emitDeathEvent(a)
-              if playerStats[b.playerName] then
-                playerStats[b.playerName].kills = playerStats[b.playerName].kills + 1
+              if consumeShield(a) then
+                separateEntities(a, b)
+              else
+                a.dead = true
+                b.kills = b.kills + 1
+                growEntity(b)
+                emitDeathEvent(a)
+                if playerStats[b.playerName] then
+                  playerStats[b.playerName].kills = playerStats[b.playerName].kills + 1
+                end
+                aliveCounts[a.kind] = math.max(0, aliveCounts[a.kind] - 1)
+                break
               end
-              aliveCounts[a.kind] = math.max(0, aliveCounts[a.kind] - 1)
-              break
             else
               separateEntities(a, b)
             end
@@ -402,6 +468,7 @@ local function spawnEntity(entry)
     spawnY = centerY,
     targetEntity = nil,
     speed = DEFAULT_SPEED,
+    shieldActive = true,
   }
 
   spawnedEntities[#spawnedEntities + 1] = entity
@@ -484,7 +551,7 @@ function module.start()
 
   spawnQueue = {}
   for index, playerName in ipairs(playerNames) do
-    local kind = orderedKinds[((index - 1) % #orderedKinds) + 1]
+    local kind = chooseSpawnKind()
     spawnQueue[#spawnQueue + 1] = {
       playerName = playerName,
       kind = kind,
@@ -629,6 +696,7 @@ function module.draw()
       local labelX = entity.x + (entity.width - infoFont:getWidth(label)) / 2
       love.graphics.print(label, labelX, entity.y - infoFont:getHeight() - 4)
       love.graphics.draw(image, entity.x, entity.y, 0, entity.scale, entity.scale)
+      drawShield(entity)
     end
   end
 
