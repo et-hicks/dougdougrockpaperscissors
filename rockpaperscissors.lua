@@ -17,12 +17,6 @@ local BEATS = {
   Scissors = "Paper",
 }
 
-local CLASS_SHORTHAND = {
-  Paper = "P",
-  Rock = "R",
-  Scissors = "C",
-}
-
 local orderedKinds = { "Paper", "Rock", "Scissors" }
 local spawnWeights = {
   { kind = "Rock", weight = 0.4 },
@@ -37,6 +31,16 @@ local function getKillSpeedMultiplier(entity)
   end
   return 1 + 0.1 * kills
 end
+
+local function getSpeedBonusMultiplier(entity)
+  return (entity and entity.speedBonus) or 1
+end
+
+local CLASS_SHORTHAND = {
+  Paper = "P",
+  Rock = "R",
+  Scissors = "C",
+}
 
 local infoFont
 local victoryFont
@@ -126,9 +130,10 @@ local function removeAliveRecord(entity)
 end
 
 local function setEntitySpeed(entity, speed)
-  local effectiveSpeed = speed
+  entity.baseSpeed = speed or entity.baseSpeed or 0
+  local effectiveSpeed = entity.baseSpeed
   if effectiveSpeed and effectiveSpeed > 0 then
-    effectiveSpeed = effectiveSpeed * getKillSpeedMultiplier(entity)
+    effectiveSpeed = effectiveSpeed * getKillSpeedMultiplier(entity) * getSpeedBonusMultiplier(entity)
   end
 
   entity.speed = effectiveSpeed or 0
@@ -150,9 +155,36 @@ local function setEntitySpeed(entity, speed)
   end
 end
 
+local function addShield(entity, amount)
+  if not entity or not amount or amount == 0 then
+    return
+  end
+  entity.shield = math.max(0, (entity.shield or 0) + amount)
+end
+
+local function boostSpeed(entity, percent)
+  if not entity or not percent or percent == 0 then
+    return
+  end
+  entity.speedBonus = (entity.speedBonus or 1) * (1 + percent)
+  setEntitySpeed(entity, entity.baseSpeed or DEFAULT_SPEED)
+end
+
+local function shrinkEntityByPercent(entity, percent)
+  if not entity or not percent or percent <= 0 then
+    return
+  end
+  entity.scale = entity.scale * (1 - percent)
+  entity.width = entity.image:getWidth() * entity.scale
+  entity.height = entity.image:getHeight() * entity.scale
+  local minX, minY, maxX, maxY = getPlayfieldBounds()
+  entity.x = math.max(minX, math.min(entity.x, maxX - entity.width))
+  entity.y = math.max(minY, math.min(entity.y, maxY - entity.height))
+end
+
 local function consumeShield(entity)
-  if entity and not entity.dead and entity.shieldActive then
-    entity.shieldActive = false
+  if entity and not entity.dead and (entity.shield or 0) > 0 then
+    entity.shield = entity.shield - 1
     return true
   end
   return false
@@ -228,7 +260,7 @@ local function steerScissors(entity)
 end
 
 local function drawShield(entity)
-  if not entity or not entity.shieldActive then
+  if not entity or not entity.shield or entity.shield <= 0 then
     return
   end
 
@@ -252,7 +284,7 @@ local function getActiveLeaderboardEntries()
       name = entity.playerName,
       kind = entity.kind,
       kills = entity.kills or 0,
-      shieldActive = entity.shieldActive,
+      shield = entity.shield or 0,
     }
   end
 
@@ -277,7 +309,7 @@ local function drawSidebarLeaderboard(minY, maxY)
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.rectangle("line", panelX, panelY, panelWidth, panelHeight)
 
-  local title = "Leaderboard"
+  local title = "Current Players"
   love.graphics.print(title, panelX + 10, panelY + 10)
 
   local entries = getActiveLeaderboardEntries()
@@ -347,7 +379,7 @@ local function drawSidebarLeaderboard(minY, maxY)
   drawRow({ fillDash(nameColumnWidth), fillDash(classColumnWidth), fillDash(killsColumnWidth), fillDash(shieldColumnWidth) }, { 0.8, 0.8, 0.8, 1 })
 
   for _, entry in ipairs(entries) do
-    local shieldText = entry.shieldActive and "Up" or "Down"
+    local shieldText = tostring(math.max(0, entry.shield or 0))
     local classText = CLASS_SHORTHAND[entry.kind] or "?"
     local displayName = entry.name
     while infoFont:getWidth(displayName) > nameColumnWidth do
@@ -357,10 +389,10 @@ local function drawSidebarLeaderboard(minY, maxY)
       displayName = displayName:sub(1, -2)
     end
     if displayName ~= entry.name then
-      if infoFont:getWidth(displayName .. "…") <= nameColumnWidth then
-        displayName = displayName .. "…"
+      if infoFont:getWidth(displayName .. "...") <= nameColumnWidth then
+        displayName = displayName .. "..."
       else
-        displayName = displayName:sub(1, -2) .. "…"
+        displayName = displayName:sub(1, -2) .. "..."
       end
     end
     if not drawRow({ displayName, classText, tostring(entry.kills), shieldText }, { 0.85, 0.93, 1, 1 }) then
@@ -407,6 +439,32 @@ local function separateEntities(a, b)
     else
       a.y = a.y + shift
       b.y = b.y - shift
+    end
+  end
+end
+
+local function applyAttackBonuses(attacker, defender)
+  if not attacker or attacker.dead then
+    return
+  end
+
+  addShield(attacker, 1)
+  boostSpeed(attacker, 0.05)
+
+  if attacker.kind == "Rock" and defender.kind == "Scissors" then
+    addShield(attacker, 2)
+  elseif attacker.kind == "Paper" and defender.kind == "Rock" then
+    boostSpeed(attacker, 0.30)
+  elseif attacker.kind == "Scissors" and defender.kind == "Paper" then
+    boostSpeed(attacker, 0.10)
+    shrinkEntityByPercent(attacker, 0.05)
+    local roll = love.math.random()
+    if roll <= 0.5 then
+      addShield(attacker, 2)
+    elseif roll <= 0.8 then
+      addShield(attacker, 1)
+    else
+      addShield(attacker, 3)
     end
   end
 end
@@ -514,6 +572,7 @@ local function handleEntityCollisions()
             a.vy, b.vy = b.vy, a.vy
           else
             if BEATS[a.kind] == b.kind then
+              applyAttackBonuses(a, b)
               if consumeShield(b) then
                 separateEntities(a, b)
               else
@@ -527,6 +586,7 @@ local function handleEntityCollisions()
                 aliveCounts[b.kind] = math.max(0, aliveCounts[b.kind] - 1)
               end
             elseif BEATS[b.kind] == a.kind then
+              applyAttackBonuses(b, a)
               if consumeShield(a) then
                 separateEntities(a, b)
               else
@@ -676,7 +736,9 @@ local function spawnEntity(entry)
     spawnY = centerY,
     targetEntity = nil,
     speed = DEFAULT_SPEED,
-    shieldActive = true,
+    baseSpeed = DEFAULT_SPEED,
+    speedBonus = 1,
+    shield = 1,
   }
 
   spawnedEntities[#spawnedEntities + 1] = entity
@@ -1001,25 +1063,55 @@ function module.draw()
     end
 
     local contentTop = viewportY + tabHeight + padding
-    love.graphics.printf(activeTab.label, viewportX, contentTop - fontHeight - 2, viewportWidth, "center")
-
     local scissorX = viewportX
     local scissorY = contentTop
     local scissorHeight = viewportHeight - (contentTop - viewportY) - padding
     love.graphics.setScissor(scissorX, scissorY, viewportWidth, scissorHeight)
 
-    local y = contentTop + headerHeight - leaderboardScroll
-    if #data == 0 then
-      love.graphics.printf("No entries yet.", viewportX, y, viewportWidth, "center")
-    else
-      for index, entry in ipairs(data) do
-        local color = entry.kind == winner and { 0.3, 0.85, 0.3 } or { 0.85, 0.3, 0.3 }
-        love.graphics.setColor(color)
-        local line = string.format("%d. %s (%s) - %d", index, entry.name, entry.kind, entry.kills)
-        love.graphics.printf(line, viewportX + 12, y, viewportWidth - 24, "left")
+    local function drawTable(entries)
+      local textHeight = infoFont:getHeight()
+      local rowHeight = textHeight + 6
+      local y = contentTop + headerHeight - leaderboardScroll
+      local tableX = viewportX + 12
+      local tableWidth = viewportWidth - 24
+      local nameWidth = tableWidth * 0.45
+      local classWidth = tableWidth * 0.2
+      local killsWidth = tableWidth - nameWidth - classWidth
+
+      local columnWidths = { nameWidth, classWidth, killsWidth }
+      local columnOffsets = { tableX, tableX + nameWidth, tableX + nameWidth + classWidth }
+      local columnAlignments = { "left", "center", "center" }
+
+      local function drawRow(columns, color)
+        love.graphics.setColor(color or { 1, 1, 1, 1 })
+        if y + rowHeight > scissorY + scissorHeight then
+          return false
+        end
+        for i = 1, #columns do
+          love.graphics.printf(columns[i], columnOffsets[i], y, columnWidths[i], columnAlignments[i])
+        end
         y = y + rowHeight
+        return true
+      end
+
+      drawRow({ "Name", "Class", "Kills" }, { 1, 1, 1, 1 })
+      drawRow({ "----", "-----", "-----" }, { 0.8, 0.8, 0.8, 1 })
+
+      if #entries == 0 then
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.printf("No entries yet.", tableX, y, tableWidth, "left")
+        return
+      end
+
+      for _, entry in ipairs(entries) do
+        local classText = CLASS_SHORTHAND[entry.kind] or "?"
+        if not drawRow({ entry.name, classText, tostring(entry.kills) }, { 0.85, 0.93, 1, 1 }) then
+          break
+        end
       end
     end
+
+    drawTable(data)
 
     love.graphics.setScissor()
     love.graphics.setColor(1, 1, 1)
