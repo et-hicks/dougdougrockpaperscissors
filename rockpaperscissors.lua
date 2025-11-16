@@ -5,7 +5,7 @@ local DEFAULT_SPEED = 45
 local WIN_SPEED = 100
 local PADDING = 24
 local TEXT_GAP = 6
-local SIDEBAR_WIDTH = 220
+local SIDEBAR_WIDTH = 400
 local SIDEBAR_GAP = 8
 local SHIELD_COLOR = { 0.3, 0.6, 1.0, 0.9 }
 local SHIELD_LINE_WIDTH = 2
@@ -293,17 +293,6 @@ local function drawSidebarLeaderboard(minY, maxY)
     return
   end
 
-  local maxNameChars = #"Name"
-  for _, entry in ipairs(entries) do
-    if #entry.name > maxNameChars then
-      maxNameChars = #entry.name
-    end
-  end
-  local nameColumnChars = maxNameChars + 3
-  local classColumnChars = #"Class"
-  local killsColumnChars = #"Kills"
-  local shieldColumnChars = #"Shield"
-
   local function widthForChars(chars)
     if chars <= 0 then
       return 0
@@ -311,11 +300,19 @@ local function drawSidebarLeaderboard(minY, maxY)
     return infoFont:getWidth(string.rep("W", chars))
   end
 
+  local classColumnWidth = widthForChars(3)
+  local killsColumnWidth = widthForChars(3)
+  local shieldColumnWidth = widthForChars(3)
+  local nameColumnWidth = tableWidth - (classColumnWidth + killsColumnWidth + shieldColumnWidth)
+  if nameColumnWidth < widthForChars(8) then
+    nameColumnWidth = widthForChars(8)
+  end
+
   local columnWidths = {
-    widthForChars(nameColumnChars),
-    widthForChars(classColumnChars),
-    widthForChars(killsColumnChars),
-    widthForChars(shieldColumnChars),
+    nameColumnWidth,
+    classColumnWidth,
+    killsColumnWidth,
+    shieldColumnWidth,
   }
   local columnAlignments = { "left", "center", "center", "center" }
   local columnOffsets = {}
@@ -337,17 +334,36 @@ local function drawSidebarLeaderboard(minY, maxY)
     return true
   end
 
+  local function fillDash(width)
+    local dash = "-"
+    local str = dash
+    while infoFont:getWidth(str) < width do
+      str = str .. dash
+    end
+    return str
+  end
+
   drawRow({ "Name", "Class", "Kills", "Shield" }, { 1, 1, 1, 1 })
-  drawRow({ string.rep("-", nameColumnChars), string.rep("-", classColumnChars), string.rep("-", killsColumnChars), string.rep("-", shieldColumnChars) }, { 0.8, 0.8, 0.8, 1 })
+  drawRow({ fillDash(nameColumnWidth), fillDash(classColumnWidth), fillDash(killsColumnWidth), fillDash(shieldColumnWidth) }, { 0.8, 0.8, 0.8, 1 })
 
   for _, entry in ipairs(entries) do
-    local shieldText = entry.shieldActive and "Up" or ""
+    local shieldText = entry.shieldActive and "Up" or "Down"
     local classText = CLASS_SHORTHAND[entry.kind] or "?"
-    local paddedName = string.format("%-" .. nameColumnChars .. "s", entry.name)
-    local paddedClass = string.format("%-" .. classColumnChars .. "s", classText)
-    local paddedKills = string.format("%-" .. killsColumnChars .. "s", tostring(entry.kills))
-    local paddedShield = string.format("%-" .. shieldColumnChars .. "s", shieldText)
-    if not drawRow({ paddedName, paddedClass, paddedKills, paddedShield }, { 0.85, 0.93, 1, 1 }) then
+    local displayName = entry.name
+    while infoFont:getWidth(displayName) > nameColumnWidth do
+      if #displayName <= 1 then
+        break
+      end
+      displayName = displayName:sub(1, -2)
+    end
+    if displayName ~= entry.name then
+      if infoFont:getWidth(displayName .. "…") <= nameColumnWidth then
+        displayName = displayName .. "…"
+      else
+        displayName = displayName:sub(1, -2) .. "…"
+      end
+    end
+    if not drawRow({ displayName, classText, tostring(entry.kills), shieldText }, { 0.85, 0.93, 1, 1 }) then
       break
     end
   end
